@@ -675,6 +675,11 @@ class FTH_Admin {
                         </div>
                     </div>
                     
+                    <div style="background: rgba(255,255,255,0.15); padding: 15px; border-radius: 8px; margin-bottom: 20px;">
+                        <label style="display: block; margin-bottom: 6px; font-weight: 600;">Image URL <span style="font-weight:400;opacity:0.8;">(optional — paste a direct image URL if auto-import fails)</span></label>
+                        <input type="url" id="fth_import_activity_image_url" style="width: 100%; padding: 10px; border: none; border-radius: 6px; font-size: 13px;" placeholder="https://res.klook.com/image/upload/...">
+                    </div>
+
                     <div style="display: flex; gap: 15px; align-items: center;">
                         <label style="display: flex; align-items: center; gap: 8px;">
                             <input type="checkbox" id="fth_import_activity_featured" value="1">
@@ -782,6 +787,10 @@ class FTH_Admin {
                     <div style="background: rgba(255,255,255,0.15); padding: 20px; border-radius: 8px; margin-bottom: 20px;">
                         <label style="display: block; margin-bottom: 8px; font-weight: 600;">Klook Hotel Detail URL</label>
                         <input type="text" id="fth_import_hotel_url" style="width: 100%; padding: 12px; border: none; border-radius: 6px; font-size: 14px;" placeholder="https://www.klook.com/en-US/hotels/detail/92226-rove-at-the-park/">
+                    </div>
+                    <div style="background: rgba(255,255,255,0.15); padding: 15px; border-radius: 8px; margin-bottom: 20px;">
+                        <label style="display: block; margin-bottom: 6px; font-weight: 600;">Image URL <span style="font-weight:400;opacity:0.8;">(optional)</span></label>
+                        <input type="url" id="fth_import_hotel_image_url" style="width: 100%; padding: 10px; border: none; border-radius: 6px; font-size: 13px;" placeholder="https://res.klook.com/image/upload/...">
                     </div>
                     <div style="display: grid; grid-template-columns: 1fr 1fr 160px; gap: 15px; margin-bottom: 20px;">
                         <div>
@@ -934,6 +943,7 @@ class FTH_Admin {
                         is_featured: $('#fth_import_activity_featured').is(':checked') ? 1 : 0,
                         is_bestseller: $('#fth_import_activity_bestseller').is(':checked') ? 1 : 0,
                         publish: $('#fth_import_activity_publish').is(':checked') ? 1 : 0,
+                        manual_image_url: $('#fth_import_activity_image_url').val().trim(),
                         nonce: '<?php echo wp_create_nonce('fth_import_publish'); ?>'
                     },
                     success: function(response) {
@@ -1017,7 +1027,7 @@ $('#fth_bulk_import_btn').on('click', function() {
                 }
                 $btn.prop('disabled', true).text('Importing...');
                 $status.css('background','rgba(255,255,255,0.2)').text('Fetching hotel data from Klook...').show();
-                $.post(ajaxurl, {action:'fth_import_and_publish', type:'hotel', url:url, city:$('#fth_import_hotel_city').val(), country:$('#fth_import_hotel_country').val(), publish: $('#fth_import_hotel_publish').is(':checked') ? 1 : 0, nonce:'<?php echo wp_create_nonce('fth_import_publish'); ?>'}, function(response){
+                $.post(ajaxurl, {action:'fth_import_and_publish', type:'hotel', url:url, city:$('#fth_import_hotel_city').val(), country:$('#fth_import_hotel_country').val(), publish: $('#fth_import_hotel_publish').is(':checked') ? 1 : 0, manual_image_url: $('#fth_import_hotel_image_url').val().trim(), nonce:'<?php echo wp_create_nonce('fth_import_publish'); ?>'}, function(response){
                     if (response.success) {
                         $status.css('background','rgba(76,175,80,0.3)').html('✅ <strong>Success!</strong> Hotel imported. <a href="'+response.data.edit_url+'" style="color:#fff;text-decoration:underline;">Edit</a> | <a href="'+response.data.view_url+'" target="_blank" style="color:#fff;text-decoration:underline;">View</a>').show();
                         $('#fth_import_hotel_url').val('');

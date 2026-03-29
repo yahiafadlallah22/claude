@@ -32,13 +32,18 @@ $sym_map   = array('USD'=>'$','AED'=>'AED ','EUR'=>'€','GBP'=>'£','SAR'=>'SAR
 $sym       = isset($sym_map[$currency]) ? $sym_map[$currency] : $currency . ' ';
 $amen_list = array_filter(array_map('trim', preg_split('/\r\n|\r|\n/', (string) $amenities_raw)));
 
-// Gallery
+// Gallery – proxy Klook CDN URLs so they display in the browser
 $main_img  = has_post_thumbnail($post_id) ? get_the_post_thumbnail_url($post_id, 'full') : get_post_meta($post_id, '_fth_external_image', true);
+$main_img  = Flavor_Travel_Hub::fth_img_url($main_img);
 $gallery   = array();
 $gids      = array_filter(array_map('intval', explode(',', (string) get_post_meta($post_id, '_fth_gallery', true))));
 foreach ($gids as $gid) { $u = wp_get_attachment_image_url($gid, 'large'); if ($u) $gallery[] = $u; }
 $gext      = array_filter(array_map('trim', explode(',', (string) get_post_meta($post_id, '_fth_external_gallery', true))));
-foreach ($gext as $img) { if ($img && !in_array($img, $gallery, true) && $img !== $main_img) $gallery[] = $img; }
+foreach ($gext as $img) {
+    if ($img && !in_array($img, $gallery, true) && $img !== $main_img) {
+        $gallery[] = Flavor_Travel_Hub::fth_img_url($img);
+    }
+}
 if ($main_img) array_unshift($gallery, $main_img);
 $gallery   = array_values(array_unique(array_filter($gallery)));
 
@@ -92,11 +97,32 @@ body.single-travel_hotel .widget-area,body.single-travel_hotel .sidebar,body.sin
 .klh-cta:hover{opacity:.88}
 .klh-trust{display:grid;gap:10px;margin-top:16px}
 .klh-trust-item{display:flex;gap:10px;align-items:flex-start;font-size:13px;color:#555}
-@media(max-width:1100px){.klh-main{grid-template-columns:1fr}.klh-sidebar{position:static}.klh-related-grid{grid-template-columns:repeat(2,minmax(0,1fr))}.klh-amenities{grid-template-columns:1fr}}
+.klh-mobile-cta{display:none}
+@media(max-width:1100px){
+  .klh-main{grid-template-columns:1fr}.klh-sidebar{position:static}.klh-related-grid{grid-template-columns:repeat(2,minmax(0,1fr))}.klh-amenities{grid-template-columns:1fr}
+  .klh-mobile-cta{display:flex;position:sticky;top:0;z-index:999;width:100%;background:<?php echo esc_attr($primary); ?>;color:#fff;align-items:center;justify-content:space-between;padding:12px 16px;gap:10px;box-shadow:0 2px 12px rgba(0,0,0,.18)}
+  .klh-mobile-cta-price{font-size:18px;font-weight:900;line-height:1}
+  .klh-mobile-cta-price small{display:block;font-size:11px;font-weight:400;opacity:.8}
+  .klh-mobile-cta-btn{flex-shrink:0;background:#fff;color:<?php echo esc_attr($primary); ?>;font-weight:800;font-size:14px;padding:10px 18px;border-radius:8px;text-decoration:none;white-space:nowrap}
+}
 @media(max-width:640px){.klh-title{font-size:22px}.klh-related-grid{grid-template-columns:1fr}}
 </style>
 
 <div class="klh">
+  <!-- Mobile sticky CTA bar (hidden on desktop via CSS) -->
+  <div class="klh-mobile-cta">
+    <div class="klh-mobile-cta-price">
+      <small>Per night from</small>
+      <?php if ($price): ?>
+        <?php echo esc_html($sym . number_format((float)$price, 0)); ?>
+      <?php else: ?>
+        <span style="font-size:15px;">Check rate</span>
+      <?php endif; ?>
+    </div>
+    <a class="klh-mobile-cta-btn" href="<?php echo esc_url($affiliate_link ?: '#'); ?>" target="_blank" rel="noopener noreferrer">
+      🏨 <?php echo esc_html($cta_text); ?>
+    </a>
+  </div>
   <div class="klh-bc"><div class="klh-bc-in">
     <a href="<?php echo esc_url(FTH_Templates::get_hub_url('hotels')); ?>">Hotels</a>
     <span>›</span>

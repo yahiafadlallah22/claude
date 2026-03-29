@@ -36,15 +36,20 @@ $country_link   = !empty($countries) ? get_term_link($countries[0]) : '';
 $sym_map = array('USD'=>'$','AED'=>'AED ','EUR'=>'€','GBP'=>'£','SAR'=>'SAR ','QAR'=>'QAR ');
 $sym     = isset($sym_map[$currency]) ? $sym_map[$currency] : $currency . ' ';
 
-// Gallery
+// Gallery – proxy Klook CDN URLs so they display in the browser
 $main_img = has_post_thumbnail($post_id)
     ? get_the_post_thumbnail_url($post_id, 'full')
     : get_post_meta($post_id, '_fth_external_image', true);
+$main_img = Flavor_Travel_Hub::fth_img_url($main_img);
 $gallery  = array();
 $gids     = array_filter(array_map('intval', explode(',', (string) get_post_meta($post_id, '_fth_gallery', true))));
 foreach ($gids as $gid) { $u = wp_get_attachment_image_url($gid, 'large'); if ($u) $gallery[] = $u; }
 $gext = array_filter(array_map('trim', explode(',', (string) get_post_meta($post_id, '_fth_external_gallery', true))));
-foreach ($gext as $img) { if ($img && !in_array($img, $gallery, true) && $img !== $main_img) $gallery[] = $img; }
+foreach ($gext as $img) {
+    if ($img && !in_array($img, $gallery, true) && $img !== $main_img) {
+        $gallery[] = Flavor_Travel_Hub::fth_img_url($img);
+    }
+}
 if ($main_img) array_unshift($gallery, $main_img);
 $gallery = array_values(array_unique(array_filter($gallery)));
 
@@ -122,12 +127,42 @@ body.single-travel_activity .widget-area,body.single-travel_activity .sidebar,bo
 .kl-trust-icon{font-size:18px;flex:0 0 24px}
 /* Related */
 .kl-related-grid{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:16px}
-/* Responsive */
-@media(max-width:1100px){.kl-main{grid-template-columns:1fr}.kl-sidebar{position:static}.kl-related-grid{grid-template-columns:repeat(2,minmax(0,1fr))}}
+/* Mobile sticky CTA bar */
+.kl-mobile-cta{display:none}
+@media(max-width:1100px){
+  .kl-main{grid-template-columns:1fr}.kl-sidebar{position:static}.kl-related-grid{grid-template-columns:repeat(2,minmax(0,1fr))}
+  .kl-mobile-cta{display:flex;position:sticky;top:0;z-index:999;width:100%;background:<?php echo esc_attr($primary); ?>;color:#fff;align-items:center;justify-content:space-between;padding:12px 16px;gap:10px;box-shadow:0 2px 12px rgba(0,0,0,.18)}
+  .kl-mobile-cta-price{font-size:18px;font-weight:900;line-height:1}
+  .kl-mobile-cta-price small{display:block;font-size:11px;font-weight:400;opacity:.8}
+  .kl-mobile-cta-btn{flex-shrink:0;background:#fff;color:<?php echo esc_attr($primary); ?>;font-weight:800;font-size:14px;padding:10px 18px;border-radius:8px;text-decoration:none;white-space:nowrap}
+  .kl-mobile-cta-btn:hover{opacity:.9}
+}
 @media(max-width:640px){.kl-title{font-size:22px}.kl-related-grid{grid-template-columns:1fr}}
+/* Yahia promo box – mobile vs desktop visibility */
+.kl-yahia-mobile{display:none}
+.kl-yahia-desktop{display:block}
+@media(max-width:1100px){
+  .kl-yahia-mobile{display:block;background:#fff7ed;border:1px solid #fed7aa;border-radius:12px;padding:16px;text-align:center;margin-top:16px}
+  .kl-yahia-desktop{display:none}
+}
 </style>
 
 <div class="kl">
+  <!-- Mobile sticky CTA bar (hidden on desktop via CSS) -->
+  <div class="kl-mobile-cta">
+    <div class="kl-mobile-cta-price">
+      <small>From</small>
+      <?php if ($price): ?>
+        <?php echo esc_html($sym . number_format((float)$price, 0)); ?>
+      <?php else: ?>
+        <span style="font-size:15px;">Check price</span>
+      <?php endif; ?>
+    </div>
+    <a class="kl-mobile-cta-btn" href="<?php echo esc_url($affiliate_link ?: '#'); ?>" target="_blank" rel="noopener noreferrer">
+      🎟 <?php echo esc_html($cta_text); ?>
+    </a>
+  </div>
+
   <!-- Breadcrumb -->
   <div class="kl-bc"><div class="kl-bc-in">
     <a href="<?php echo esc_url(FTH_Templates::get_hub_url('things-to-do')); ?>">Things to do</a>
@@ -185,6 +220,15 @@ body.single-travel_activity .widget-area,body.single-travel_activity .sidebar,bo
         <h2 class="kl-sec-title"><span class="icon">ℹ</span> About this experience</h2>
         <div class="kl-content"><?php the_content(); ?></div>
         <?php if ($meeting_point): ?><p style="margin-top:14px;font-size:14px;"><strong>Meeting point:</strong> <?php echo esc_html($meeting_point); ?></p><?php endif; ?>
+      </div>
+
+      <!-- Yahia promo box – shown on mobile right after "About this experience" -->
+      <div class="kl-yahia-mobile">
+        <img src="https://yahiadubai.com/wp-content/uploads/2026/03/New-Project-4.png" alt="Yahia Fadlallah" style="max-width:100px;height:auto;display:block;margin:0 auto 10px;border-radius:8px;">
+        <div style="font-size:14px;color:#92400e;font-weight:700;">🤝 <?php echo esc_html($promo_text); ?></div>
+        <?php if ($affiliate_link): ?>
+        <a href="<?php echo esc_url($affiliate_link); ?>" target="_blank" rel="noopener noreferrer" style="display:inline-block;margin-top:10px;background:<?php echo esc_attr($primary); ?>;color:#fff;font-weight:800;font-size:14px;padding:10px 22px;border-radius:8px;text-decoration:none;">🎟 <?php echo esc_html($cta_text); ?></a>
+        <?php endif; ?>
       </div>
 
       <!-- Highlights -->
@@ -287,7 +331,7 @@ body.single-travel_activity .widget-area,body.single-travel_activity .sidebar,bo
         <a class="kl-cta" href="<?php echo esc_url($affiliate_link ?: '#'); ?>" target="_blank" rel="noopener noreferrer">
           🎟 <?php echo esc_html($cta_text); ?>
         </a>
-        <div style="background:#fff7ed;border:1px solid #fed7aa;border-radius:10px;padding:14px;text-align:center;margin-bottom:16px;">
+        <div class="kl-yahia-desktop" style="background:#fff7ed;border:1px solid #fed7aa;border-radius:10px;padding:14px;text-align:center;margin-bottom:16px;">
           <img src="https://yahiadubai.com/wp-content/uploads/2026/03/New-Project-4.png" alt="Yahia Fadlallah" style="max-width:120px;height:auto;display:block;margin:0 auto 8px;border-radius:8px;">
           <div style="font-size:13px;color:#92400e;font-weight:700;">🤝 <?php echo esc_html($promo_text); ?></div>
         </div>
