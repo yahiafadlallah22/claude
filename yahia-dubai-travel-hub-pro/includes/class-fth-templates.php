@@ -240,41 +240,68 @@ class FTH_Templates {
             'card_class'    => '',
         );
         $args = wp_parse_args($args, $defaults);
-        $title = get_the_title($post_id);
-        $permalink = get_permalink($post_id);
-        $price = get_post_meta($post_id, '_fth_price', true);
-        $original_price = get_post_meta($post_id, '_fth_original_price', true);
-        $currency = get_post_meta($post_id, '_fth_currency', true) ?: 'USD';
-        $rating = get_post_meta($post_id, '_fth_rating', true);
-        $review_count = get_post_meta($post_id, '_fth_review_count', true);
-        $external_image = get_post_meta($post_id, '_fth_external_image', true);
-        $affiliate_link = get_post_meta($post_id, '_fth_affiliate_link', true);
-        $image_url = has_post_thumbnail($post_id) ? get_the_post_thumbnail_url($post_id, 'medium_large') : $external_image;
-        if (!$image_url) { $image_url = 'https://images.unsplash.com/photo-1476514525535-07fb3b4ae5f1?w=1200'; }
-        $cities = wp_get_post_terms($post_id, 'travel_city');
-        $city_name = !empty($cities) ? $cities[0]->name : '';
-        $categories = wp_get_post_terms($post_id, 'travel_category');
-        $category_name = !empty($categories) ? $categories[0]->name : '';
+        $title           = get_the_title($post_id);
+        $permalink       = get_permalink($post_id);
+        $price           = get_post_meta($post_id, '_fth_price', true);
+        $original_price  = get_post_meta($post_id, '_fth_original_price', true);
+        $currency        = get_post_meta($post_id, '_fth_currency', true) ?: 'USD';
+        $rating          = get_post_meta($post_id, '_fth_rating', true);
+        $review_count    = get_post_meta($post_id, '_fth_review_count', true);
+        $external_image  = get_post_meta($post_id, '_fth_external_image', true);
+        $affiliate_link  = get_post_meta($post_id, '_fth_affiliate_link', true);
+        $image_url       = has_post_thumbnail($post_id) ? get_the_post_thumbnail_url($post_id, 'medium_large') : $external_image;
+        if (!$image_url) { $image_url = 'https://images.unsplash.com/photo-1476514525535-07fb3b4ae5f1?w=800&q=80'; }
+        $cities          = wp_get_post_terms($post_id, 'travel_city');
+        $city_name       = !empty($cities) ? $cities[0]->name : '';
+        $categories      = wp_get_post_terms($post_id, 'travel_category');
+        $category_name   = !empty($categories) ? $categories[0]->name : '';
         $currency_symbols = array('USD' => '$','AED' => 'AED ','EUR' => '€','GBP' => '£','SAR' => 'SAR ','QAR' => 'QAR ');
-        $symbol = isset($currency_symbols[$currency]) ? $currency_symbols[$currency] : $currency . ' ';
-        $primary_color = Flavor_Travel_Hub::get_primary_color();
-        $secondary_color = Flavor_Travel_Hub::get_secondary_color();
+        $symbol          = isset($currency_symbols[$currency]) ? $currency_symbols[$currency] : $currency . ' ';
+        $primary_color   = Flavor_Travel_Hub::get_primary_color();
+        $has_discount    = $original_price && (float) $original_price > (float) $price && (float) $price > 0;
+        $discount_pct    = $has_discount ? round((1 - (float)$price / (float)$original_price) * 100) : 0;
+        $link            = $affiliate_link ?: $permalink;
         ob_start(); ?>
-        <article class="fth-card fth-card-activity <?php echo esc_attr($args['card_class']); ?>">
-            <a href="<?php echo esc_url($permalink); ?>" class="fth-card-media" aria-label="<?php echo esc_attr($title); ?>">
-                <span class="fth-card-media-img" style="background-image:url('<?php echo esc_url($image_url); ?>');"></span>
-                <?php if ($args['show_category'] && $category_name) : ?><span class="fth-card-tag" style="background:<?php echo esc_attr($secondary_color); ?>;"><?php echo esc_html($category_name); ?></span><?php endif; ?>
+        <article class="fth-lux-card" itemscope itemtype="https://schema.org/TouristAttraction">
+            <a href="<?php echo esc_url($permalink); ?>" class="fth-lux-img-wrap" aria-label="<?php echo esc_attr($title); ?>">
+                <span class="fth-lux-img" style="background-image:url('<?php echo esc_url($image_url); ?>');"></span>
+                <span class="fth-lux-img-overlay"></span>
+                <?php if ($has_discount && $discount_pct >= 5): ?>
+                <span class="fth-lux-badge fth-lux-badge-deal">-<?php echo (int)$discount_pct; ?>%</span>
+                <?php elseif ($args['show_category'] && $category_name): ?>
+                <span class="fth-lux-badge"><?php echo esc_html($category_name); ?></span>
+                <?php endif; ?>
+                <?php if ($args['show_rating'] && $rating): ?>
+                <span class="fth-lux-rating-pill">
+                    <svg width="11" height="11" viewBox="0 0 24 24" fill="#FFD700"><path d="M12 2l3.09 6.26L22 9.27l-5 4.87 1.18 6.88L12 17.77l-6.18 3.25L7 14.14 2 9.27l6.91-1.01L12 2z"/></svg>
+                    <?php echo esc_html(number_format((float)$rating, 1)); ?>
+                    <?php if ($review_count): ?><span>(<?php echo esc_html(number_format((int)$review_count)); ?>)</span><?php endif; ?>
+                </span>
+                <?php endif; ?>
             </a>
-            <div class="fth-card-body">
-                <?php if ($args['show_city'] && $city_name) : ?><div class="fth-card-place"><?php echo esc_html($city_name); ?></div><?php endif; ?>
-                <h3 class="fth-card-title"><a href="<?php echo esc_url($permalink); ?>"><?php echo esc_html($title); ?></a></h3>
-                <?php if ($args['show_rating'] && $rating) : ?><div class="fth-card-rating">★ <?php echo esc_html(number_format((float) $rating, 1)); ?><?php if ($review_count) : ?><span>(<?php echo esc_html(number_format((int) $review_count)); ?>)</span><?php endif; ?></div><?php endif; ?>
-                <div class="fth-card-bottom">
-                    <div class="fth-card-price-box">
-                        <?php if ($original_price && (float) $original_price > (float) $price) : ?><div class="fth-card-price-old"><?php echo esc_html($symbol . number_format((float) $original_price, 2)); ?></div><?php endif; ?>
-                        <?php if ($args['show_price'] && $price) : ?><div class="fth-card-price-now"><span>From</span> <?php echo esc_html($symbol . number_format((float) $price, 2)); ?></div><?php endif; ?>
+            <div class="fth-lux-body">
+                <?php if ($args['show_city'] && $city_name): ?>
+                <div class="fth-lux-location">
+                    <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><path d="M21 10c0 7-9 13-9 13s-9-6-9-13a9 9 0 0118 0z"/><circle cx="12" cy="10" r="3"/></svg>
+                    <span itemprop="address"><?php echo esc_html($city_name); ?></span>
+                </div>
+                <?php endif; ?>
+                <h3 class="fth-lux-title" itemprop="name"><a href="<?php echo esc_url($permalink); ?>"><?php echo esc_html($title); ?></a></h3>
+                <div class="fth-lux-footer">
+                    <div class="fth-lux-price">
+                        <?php if ($has_discount): ?>
+                        <s class="fth-lux-price-old"><?php echo esc_html($symbol . number_format((float)$original_price, 0)); ?></s>
+                        <?php endif; ?>
+                        <?php if ($args['show_price'] && $price): ?>
+                        <div class="fth-lux-price-now">
+                            <small>From</small>
+                            <strong><?php echo esc_html($symbol . number_format((float)$price, 0)); ?></strong>
+                        </div>
+                        <?php endif; ?>
                     </div>
-                    <a href="<?php echo esc_url($affiliate_link ?: $permalink); ?>" class="fth-card-btn" style="background-color: <?php echo esc_attr($primary_color); ?>;" <?php echo $affiliate_link ? 'target="_blank" rel="noopener noreferrer"' : ''; ?>>Activate Discount</a>
+                    <a href="<?php echo esc_url($link); ?>" class="fth-lux-btn" style="background:<?php echo esc_attr($primary_color); ?>;" <?php echo $affiliate_link ? 'target="_blank" rel="noopener noreferrer"' : ''; ?>>
+                        Book Now
+                    </a>
                 </div>
             </div>
         </article>
@@ -327,39 +354,69 @@ class FTH_Templates {
      */
 
     public static function get_hotel_card($post_id, $args = array()) {
-        $title = get_the_title($post_id);
-        $permalink = get_permalink($post_id);
-        $price = get_post_meta($post_id, '_fth_price', true);
+        $title          = get_the_title($post_id);
+        $permalink      = get_permalink($post_id);
+        $price          = get_post_meta($post_id, '_fth_price', true);
         $original_price = get_post_meta($post_id, '_fth_original_price', true);
-        $currency = get_post_meta($post_id, '_fth_currency', true) ?: 'USD';
-        $rating = get_post_meta($post_id, '_fth_rating', true);
-        $review_count = get_post_meta($post_id, '_fth_review_count', true);
+        $currency       = get_post_meta($post_id, '_fth_currency', true) ?: 'USD';
+        $rating         = get_post_meta($post_id, '_fth_rating', true);
+        $review_count   = get_post_meta($post_id, '_fth_review_count', true);
+        $star_rating    = get_post_meta($post_id, '_fth_star_rating', true);
         $external_image = get_post_meta($post_id, '_fth_external_image', true);
         $affiliate_link = get_post_meta($post_id, '_fth_affiliate_link', true);
-        $cities = wp_get_post_terms($post_id, 'travel_city');
-        $city_name = !empty($cities) ? $cities[0]->name : '';
-        $primary_color = Flavor_Travel_Hub::get_primary_color();
-        $secondary_color = Flavor_Travel_Hub::get_secondary_color();
+        $cities         = wp_get_post_terms($post_id, 'travel_city');
+        $city_name      = !empty($cities) ? $cities[0]->name : '';
+        $primary_color  = Flavor_Travel_Hub::get_primary_color();
         $currency_symbols = array('USD' => '$','AED' => 'AED ','EUR' => '€','GBP' => '£','SAR' => 'SAR ','QAR' => 'QAR ');
-        $symbol = isset($currency_symbols[$currency]) ? $currency_symbols[$currency] : $currency . ' ';
-        $image_url = has_post_thumbnail($post_id) ? get_the_post_thumbnail_url($post_id, 'medium_large') : $external_image;
-        if (!$image_url) { $image_url = 'https://images.unsplash.com/photo-1505693416388-ac5ce068fe85?w=1200'; }
+        $symbol         = isset($currency_symbols[$currency]) ? $currency_symbols[$currency] : $currency . ' ';
+        $image_url      = has_post_thumbnail($post_id) ? get_the_post_thumbnail_url($post_id, 'medium_large') : $external_image;
+        if (!$image_url) { $image_url = 'https://images.unsplash.com/photo-1618773928121-c32242e63f39?w=800&q=80'; }
+        $has_discount   = $original_price && (float) $original_price > (float) $price && (float) $price > 0;
+        $discount_pct   = $has_discount ? round((1 - (float)$price / (float)$original_price) * 100) : 0;
+        $link           = $affiliate_link ?: $permalink;
         ob_start(); ?>
-        <article class="fth-card fth-card-hotel">
-            <a href="<?php echo esc_url($permalink); ?>" class="fth-card-media" aria-label="<?php echo esc_attr($title); ?>">
-                <span class="fth-card-media-img" style="background-image:url('<?php echo esc_url($image_url); ?>');"></span>
-                <span class="fth-card-tag" style="background:<?php echo esc_attr($secondary_color); ?>;">Hotel</span>
+        <article class="fth-lux-card fth-lux-card-hotel" itemscope itemtype="https://schema.org/LodgingBusiness">
+            <a href="<?php echo esc_url($permalink); ?>" class="fth-lux-img-wrap" aria-label="<?php echo esc_attr($title); ?>">
+                <span class="fth-lux-img" style="background-image:url('<?php echo esc_url($image_url); ?>');"></span>
+                <span class="fth-lux-img-overlay"></span>
+                <?php if ($has_discount && $discount_pct >= 5): ?>
+                <span class="fth-lux-badge fth-lux-badge-deal">-<?php echo (int)$discount_pct; ?>%</span>
+                <?php else: ?>
+                <span class="fth-lux-badge">🏨 Hotel</span>
+                <?php endif; ?>
+                <?php if ($rating): ?>
+                <span class="fth-lux-rating-pill">
+                    <svg width="11" height="11" viewBox="0 0 24 24" fill="#FFD700"><path d="M12 2l3.09 6.26L22 9.27l-5 4.87 1.18 6.88L12 17.77l-6.18 3.25L7 14.14 2 9.27l6.91-1.01L12 2z"/></svg>
+                    <?php echo esc_html(number_format((float)$rating, 1)); ?>
+                    <?php if ($review_count): ?><span>(<?php echo esc_html(number_format((int)$review_count)); ?>)</span><?php endif; ?>
+                </span>
+                <?php endif; ?>
+                <?php if ($star_rating): ?>
+                <span class="fth-lux-stars"><?php echo str_repeat('★', (int)$star_rating); ?></span>
+                <?php endif; ?>
             </a>
-            <div class="fth-card-body">
-                <?php if ($city_name) : ?><div class="fth-card-place"><?php echo esc_html($city_name); ?></div><?php endif; ?>
-                <h3 class="fth-card-title"><a href="<?php echo esc_url($permalink); ?>"><?php echo esc_html($title); ?></a></h3>
-                <?php if ($rating) : ?><div class="fth-card-rating">★ <?php echo esc_html(number_format((float) $rating, 1)); ?><?php if ($review_count) : ?><span>(<?php echo esc_html(number_format((int) $review_count)); ?>)</span><?php endif; ?></div><?php endif; ?>
-                <div class="fth-card-bottom">
-                    <div class="fth-card-price-box">
-                        <?php if ($original_price && (float) $original_price > (float) $price) : ?><div class="fth-card-price-old"><?php echo esc_html($symbol . number_format((float) $original_price, 2)); ?></div><?php endif; ?>
-                        <?php if ($price) : ?><div class="fth-card-price-now"><span>From</span> <?php echo esc_html($symbol . number_format((float) $price, 2)); ?></div><?php else : ?><div class="fth-card-price-now"><span>Check current rate</span></div><?php endif; ?>
+            <div class="fth-lux-body">
+                <?php if ($city_name): ?>
+                <div class="fth-lux-location">
+                    <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><path d="M21 10c0 7-9 13-9 13s-9-6-9-13a9 9 0 0118 0z"/><circle cx="12" cy="10" r="3"/></svg>
+                    <span itemprop="addressLocality"><?php echo esc_html($city_name); ?></span>
+                </div>
+                <?php endif; ?>
+                <h3 class="fth-lux-title" itemprop="name"><a href="<?php echo esc_url($permalink); ?>"><?php echo esc_html($title); ?></a></h3>
+                <div class="fth-lux-footer">
+                    <div class="fth-lux-price">
+                        <?php if ($has_discount): ?>
+                        <s class="fth-lux-price-old"><?php echo esc_html($symbol . number_format((float)$original_price, 0)); ?></s>
+                        <?php endif; ?>
+                        <div class="fth-lux-price-now">
+                            <small><?php echo $price ? 'From' : ''; ?></small>
+                            <strong><?php echo $price ? esc_html($symbol . number_format((float)$price, 0)) : 'Check rate'; ?></strong>
+                        </div>
+                        <?php if ($price): ?><div class="fth-lux-per-night">/night</div><?php endif; ?>
                     </div>
-                    <a href="<?php echo esc_url($affiliate_link ?: $permalink); ?>" class="fth-card-btn" style="background-color: <?php echo esc_attr($primary_color); ?>;" <?php echo $affiliate_link ? 'target="_blank" rel="noopener noreferrer"' : ''; ?>>Activate Discount</a>
+                    <a href="<?php echo esc_url($link); ?>" class="fth-lux-btn" style="background:<?php echo esc_attr($primary_color); ?>;" <?php echo $affiliate_link ? 'target="_blank" rel="noopener noreferrer"' : ''; ?>>
+                        Book Now
+                    </a>
                 </div>
             </div>
         </article>

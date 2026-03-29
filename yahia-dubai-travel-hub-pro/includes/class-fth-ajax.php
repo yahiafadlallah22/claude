@@ -273,6 +273,11 @@ private static function title_from_url_slug($url) {
 
 private static function normalize_front_title($title, $url = '') {
     $title = self::clean_klook_branding_text($title);
+    // Guard: discard if empty, too short, or contains no alphanumeric characters
+    // (e.g. ")", ">", single punctuation marks coming from broken JSON extraction)
+    if ($title !== '' && (mb_strlen(trim($title)) < 3 || !preg_match('/[a-zA-Z0-9\x{00C0}-\x{024F}]/u', $title))) {
+        $title = '';
+    }
     if ($title !== '') {
         $parts = preg_split('/\s*[|–—]\s*/u', $title);
         if (!empty($parts[0]) && mb_strlen(trim($parts[0])) >= 3) {

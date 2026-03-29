@@ -42,6 +42,9 @@ class FTH_AIOSEO_Integration {
         add_filter('aioseo_facebook_tags', array(__CLASS__, 'add_facebook_tags'), 10, 1);
         add_filter('aioseo_twitter_tags', array(__CLASS__, 'add_twitter_tags'), 10, 1);
         
+        // Bulk re-apply SEO AJAX
+        add_action('wp_ajax_fth_bulk_reapply_seo', array(__CLASS__, 'ajax_bulk_reapply_seo'));
+
         // Add admin notice for AIO SEO detection
         add_action('admin_notices', array(__CLASS__, 'aioseo_integration_notice'));
         
@@ -51,89 +54,104 @@ class FTH_AIOSEO_Integration {
     }
     
     /**
+     * Build a meta description padded/trimmed to exactly 150-160 characters.
+     * We try to hit ≥150 chars for AIOSEO's green band while keeping a CTA at the end.
+     */
+    private static function build_meta_description($base, $cta = 'Instant confirmation & best price guaranteed.', $target = 155) {
+        $base = rtrim(trim($base), '.!,;');
+        $desc = $base . '. ' . $cta;
+        // Trim to 160
+        if (mb_strlen($desc) > 160) {
+            $available = 160 - mb_strlen($cta) - 2;
+            $base      = mb_substr($base, 0, $available);
+            $base      = preg_replace('/\s+\S*$/u', '', $base); // break at word boundary
+            $desc      = rtrim($base, '.') . '. ' . $cta;
+        }
+        // Pad with filler if too short (< 150)
+        if (mb_strlen($desc) < 150) {
+            $filler = ' Book online with instant confirmation and secure payment.';
+            $room   = 160 - mb_strlen($desc);
+            $desc   = rtrim($desc, '.') . mb_substr($filler, 0, min(mb_strlen($filler), $room));
+            // Ensure ends with a period
+            if (!in_array(mb_substr($desc, -1), array('.', '!', '?'), true)) { $desc .= '.'; }
+        }
+        return trim($desc);
+    }
+
+    /**
      * Auto-fill Activity SEO fields
+     * Targets AIOSEO green scores: title 50-60 chars, description 150-160 chars.
      */
     public static function auto_fill_activity_seo($post_id, $post) {
         if (defined('DOING_AUTOSAVE') && DOING_AUTOSAVE) return;
         if (wp_is_post_revision($post_id)) return;
         if ($post->post_status === 'auto-draft') return;
-        
-        // Get activity data
-        $title = $post->post_title;
-        $cities = wp_get_post_terms($post_id, 'travel_city');
-        $city_name = !empty($cities) ? $cities[0]->name : '';
-        $countries = wp_get_post_terms($post_id, 'travel_country');
-        $country_name = !empty($countries) ? $countries[0]->name : '';
-        $categories = wp_get_post_terms($post_id, 'travel_category');
+
+        $title         = $post->post_title;
+        $cities        = wp_get_post_terms($post_id, 'travel_city');
+        $city_name     = !empty($cities) ? $cities[0]->name : '';
+        $countries     = wp_get_post_terms($post_id, 'travel_country');
+        $country_name  = !empty($countries) ? $countries[0]->name : '';
+        $categories    = wp_get_post_terms($post_id, 'travel_category');
         $category_name = !empty($categories) ? $categories[0]->name : '';
-        
-        $price = get_post_meta($post_id, '_fth_price', true);
-        $rating = get_post_meta($post_id, '_fth_rating', true);
-        $review_count = get_post_meta($post_id, '_fth_review_count', true);
-        $highlights = get_post_meta($post_id, '_fth_highlights', true);
-        $duration = get_post_meta($post_id, '_fth_duration', true);
-        
-        // Generate SEO Title
-        $seo_title = $title;
-        if ($city_name) {
-            $seo_title .= ' in ' . $city_name;
+        $price         = get_post_meta($post_id, '_fth_price', true);
+        $currency      = get_post_meta($post_id, '_fth_currency', true) ?: 'USD';
+        $rating        = get_post_meta($post_id, '_fth_rating', true);
+        $review_count  = get_post_meta($post_id, '_fth_review_count', true);
+        $duration      = get_post_meta($post_id, '_fth_duration', true);
+        $year          = date('Y');
+
+        // ── SEO Title: ~55 chars, keyphrase first ────────────────────
+        // Pattern: "{Title} in {City} – Tickets & Tours {Year}"
+        $seo_title = $title . ($city_name ? ' in ' . $city_name : '') . ' – Tickets & Tours ' . $year;
+        if (mb_strlen($seo_title) > 65) {
+            // Shorten: drop year, use pipe separator
+            $seo_title = $title . ($city_name ? ' in ' . $city_name : '') . ' | Tickets';
         }
-        $seo_title .= ' | Tickets';
-        
-        // Generate SEO Description
-        $excerpt = $post->post_excerpt;
-        if (empty($excerpt)) {
-            $excerpt = wp_trim_words(strip_tags($post->post_content), 25, '...');
-        }
-        
-        $seo_description = '';
-        if ($excerpt) {
-            $seo_description = $excerpt;
-        } else {
-            $seo_description = 'Book ' . $title;
-            if ($city_name) {
-                $seo_description .= ' in ' . $city_name;
-            }
-            $seo_description .= '. ';
-            if ($rating) {
-                $seo_description .= 'Rated ' . $rating . '/5';
-                if ($review_count) {
-                    $seo_description .= ' by ' . number_format($review_count) . ' travelers';
-                }
-                $seo_description .= '. ';
-            }
-            if ($duration) {
-                $seo_description .= 'Duration: ' . $duration . '. ';
-            }
-            $seo_description .= 'Instant confirmation & secure booking.';
-        }
-        
-        // ── Focus keyphrase: most specific first ─────────────────────
-        if ($city_name) {
-            $focus_keyphrase = strtolower(trim($title . ' ' . $city_name));
-        } else {
-            $focus_keyphrase = strtolower(trim($title));
+        if (mb_strlen($seo_title) > 65) {
+            // Further shorten: just title + separator
+            $seo_title = mb_substr($title, 0, 50) . ($city_name ? ', ' . $city_name : '') . ' | Book Online';
         }
 
-        // ── Additional keyphrases (up to 4) ──────────────────────────
+        // ── SEO Description: target 150-160 chars ───────────────────
+        $base = 'Book ' . $title . ($city_name ? ' in ' . $city_name : '');
+        if ($rating && $review_count) {
+            $base .= '. Rated ' . number_format((float)$rating, 1) . '/5 by ' . number_format((int)$review_count) . ' travelers';
+        }
+        if ($duration) {
+            $base .= '. Duration: ' . $duration;
+        }
+        if ($price) {
+            $syms  = array('USD'=>'$','AED'=>'AED ','EUR'=>'€','GBP'=>'£');
+            $sym   = isset($syms[$currency]) ? $syms[$currency] : $currency . ' ';
+            $base .= '. From ' . $sym . number_format((float)$price, 0);
+        }
+        $seo_description = self::build_meta_description(
+            $base,
+            'Instant confirmation & best price guaranteed.',
+            155
+        );
+
+        // ── Focus keyphrase: long-tail, location-specific ────────────
+        $focus_keyphrase = $city_name
+            ? strtolower(trim($title . ' ' . $city_name))
+            : strtolower(trim($title));
+
+        // ── Additional keyphrases (up to 4, semantic diversity) ──────
         $additional = array_values(array_unique(array_filter(array(
             $city_name    ? strtolower($city_name . ' things to do')   : '',
-            $city_name    ? strtolower($city_name . ' tickets')        : '',
             $city_name    ? strtolower($city_name . ' tours')          : '',
+            $category_name? strtolower($category_name . ' ' . ($city_name ?: 'tours')) : '',
             $country_name ? strtolower($country_name . ' activities')  : '',
             strtolower($title . ' tickets'),
             strtolower($title . ' booking'),
         ))));
         $additional = array_slice($additional, 0, 4);
 
-        // ── Featured image for OG ─────────────────────────────────────
-        $og_image = '';
-        if (has_post_thumbnail($post_id)) {
-            $og_image = get_the_post_thumbnail_url($post_id, 'large');
-        }
-        if (!$og_image) {
-            $og_image = get_post_meta($post_id, '_fth_external_image', true);
-        }
+        // ── OG image ─────────────────────────────────────────────────
+        $og_image = has_post_thumbnail($post_id)
+            ? get_the_post_thumbnail_url($post_id, 'large')
+            : get_post_meta($post_id, '_fth_external_image', true);
 
         self::update_aioseo_meta($post_id, array(
             'title'                => $seo_title,
@@ -142,19 +160,15 @@ class FTH_AIOSEO_Integration {
             'additional_keyphrases'=> $additional,
             'og_title'             => $seo_title,
             'og_description'       => $seo_description,
-            'og_image'             => $og_image,
+            'og_image'             => $og_image ?: '',
             'twitter_title'        => $seo_title,
             'twitter_description'  => $seo_description,
         ));
 
-        // Legacy _fth_seo_keywords for internal use
-        update_post_meta($post_id, '_fth_seo_keywords', implode(', ', array_merge(
-            array($title),
-            $city_name    ? array($city_name)    : array(),
-            $country_name ? array($country_name) : array(),
-            $category_name? array($category_name): array(),
-            array('tours', 'activities', 'book online')
-        )));
+        // Internal keyword cache
+        update_post_meta($post_id, '_fth_seo_keywords', implode(', ', array_filter(array(
+            $title, $city_name, $country_name, $category_name, 'tours', 'activities', 'book online'
+        ))));
     }
     
     /**
@@ -204,64 +218,75 @@ class FTH_AIOSEO_Integration {
     
     /**
      * Auto-fill Hotel SEO fields
+     * Targets AIOSEO green scores: title 50-65 chars, description 150-160 chars.
      */
     public static function auto_fill_hotel_seo($post_id, $post) {
         if (defined('DOING_AUTOSAVE') && DOING_AUTOSAVE) return;
         if (wp_is_post_revision($post_id)) return;
         if ($post->post_status === 'auto-draft') return;
-        
-        $title = $post->post_title;
-        $cities = wp_get_post_terms($post_id, 'travel_city');
-        $city_name = !empty($cities) ? $cities[0]->name : '';
-        $countries = wp_get_post_terms($post_id, 'travel_country');
+
+        $title        = $post->post_title;
+        $cities       = wp_get_post_terms($post_id, 'travel_city');
+        $city_name    = !empty($cities) ? $cities[0]->name : '';
+        $countries    = wp_get_post_terms($post_id, 'travel_country');
         $country_name = !empty($countries) ? $countries[0]->name : '';
-        $star_rating = get_post_meta($post_id, '_fth_star_rating', true);
-        $price = get_post_meta($post_id, '_fth_price', true);
-        
-        // SEO Title
-        $seo_title = $title;
-        if ($city_name) {
-            $seo_title .= ' - ' . $city_name;
-        }
+        $star_rating  = (int) get_post_meta($post_id, '_fth_star_rating', true);
+        $rating       = get_post_meta($post_id, '_fth_rating', true);
+        $review_count = get_post_meta($post_id, '_fth_review_count', true);
+        $price        = get_post_meta($post_id, '_fth_price', true);
+        $currency     = get_post_meta($post_id, '_fth_currency', true) ?: 'USD';
+        $year         = date('Y');
+
+        // ── SEO Title: ~55-65 chars, hotel name + location + star ───
         if ($star_rating) {
-            $seo_title .= ' | ' . $star_rating . '-Star Hotel';
+            $seo_title = $title . ($city_name ? ', ' . $city_name : '') . ' – ' . $star_rating . '-Star Hotel ' . $year;
+        } else {
+            $seo_title = $title . ($city_name ? ' in ' . $city_name : '') . ' – Compare Rates ' . $year;
         }
-        
-        
-        // SEO Description
-        $seo_description = 'Book ' . $title;
-        if ($city_name) {
-            $seo_description .= ' in ' . $city_name;
+        if (mb_strlen($seo_title) > 65) {
+            $seo_title = $title . ($city_name ? ', ' . $city_name : '') . ($star_rating ? ' | ' . $star_rating . '★ Hotel' : ' | Hotel');
         }
-        $seo_description .= '. ';
-        if ($star_rating) {
-            $seo_description .= $star_rating . '-star accommodation. ';
+        if (mb_strlen($seo_title) > 65) {
+            $seo_title = mb_substr($title, 0, 48) . ($city_name ? ', ' . $city_name : '') . ' | Hotel';
+        }
+
+        // ── SEO Description: 150-160 chars ──────────────────────────
+        $base = 'Book ' . $title . ($city_name ? ' in ' . $city_name : '');
+        if ($star_rating) { $base .= ' – ' . $star_rating . '-star accommodation'; }
+        if ($rating && $review_count) {
+            $base .= '. Rated ' . number_format((float)$rating, 1) . '/5 (' . number_format((int)$review_count) . ' reviews)';
         }
         if ($price) {
-            $seo_description .= 'From $' . number_format($price, 2) . '/night. ';
+            $syms  = array('USD'=>'$','AED'=>'AED ','EUR'=>'€','GBP'=>'£');
+            $sym   = isset($syms[$currency]) ? $syms[$currency] : $currency . ' ';
+            $base .= '. From ' . $sym . number_format((float)$price, 0) . '/night';
         }
-        $seo_description .= 'Best rates guaranteed.';
-        
+        $seo_description = self::build_meta_description(
+            $base,
+            'Best rates, free cancellation & instant confirmation.',
+            155
+        );
+
+        // ── Focus keyphrase ──────────────────────────────────────────
         $focus_keyphrase = $city_name
             ? strtolower(trim($title . ' ' . $city_name))
             : strtolower(trim($title));
 
+        // ── Additional keyphrases ────────────────────────────────────
         $additional = array_values(array_unique(array_filter(array(
             $city_name    ? strtolower($city_name . ' hotels')          : '',
-            $city_name    ? strtolower($city_name . ' hotel rooms')     : '',
+            $city_name    ? strtolower('best hotels in ' . $city_name)  : '',
             $country_name ? strtolower($country_name . ' hotels')       : '',
+            $star_rating  ? strtolower($star_rating . ' star hotels ' . ($city_name ?: '')) : '',
             strtolower($title . ' booking'),
-            strtolower($title . ' rooms'),
+            strtolower($title . ' rooms rates'),
         ))));
         $additional = array_slice($additional, 0, 4);
 
-        $og_image = '';
-        if (has_post_thumbnail($post_id)) {
-            $og_image = get_the_post_thumbnail_url($post_id, 'large');
-        }
-        if (!$og_image) {
-            $og_image = get_post_meta($post_id, '_fth_external_image', true);
-        }
+        // ── OG image ─────────────────────────────────────────────────
+        $og_image = has_post_thumbnail($post_id)
+            ? get_the_post_thumbnail_url($post_id, 'large')
+            : get_post_meta($post_id, '_fth_external_image', true);
 
         self::update_aioseo_meta($post_id, array(
             'title'                => $seo_title,
@@ -270,57 +295,65 @@ class FTH_AIOSEO_Integration {
             'additional_keyphrases'=> $additional,
             'og_title'             => $seo_title,
             'og_description'       => $seo_description,
-            'og_image'             => $og_image,
+            'og_image'             => $og_image ?: '',
+            'twitter_title'        => $seo_title,
+            'twitter_description'  => $seo_description,
         ));
     }
     
     /**
      * Auto-fill City taxonomy SEO
+     * Targets AIOSEO green scores: title 50-65 chars, description 150-160 chars.
      */
     public static function auto_fill_city_seo($term_id, $tt_id = 0) {
         $term = get_term($term_id, 'travel_city');
         if (!$term || is_wp_error($term)) return;
-        
-        $country_id = get_term_meta($term_id, 'fth_parent_country', true);
+
+        $country_id   = get_term_meta($term_id, 'fth_parent_country', true);
         $country_name = '';
         if ($country_id) {
             $country = get_term($country_id, 'travel_country');
-            if ($country && !is_wp_error($country)) {
-                $country_name = $country->name;
-            }
+            if ($country && !is_wp_error($country)) { $country_name = $country->name; }
         }
-        
+
         $activity_count = FTH_Templates::get_city_activity_count($term_id);
-        
-        // SEO Title
-        $seo_title = 'Things to Do in ' . $term->name;
-        if ($country_name) {
-            $seo_title .= ', ' . $country_name;
+        $year           = date('Y');
+
+        // ── SEO Title: 50-65 chars ───────────────────────────────────
+        $seo_title = 'Things to Do in ' . $term->name . ' ' . $year . ' – ' . $activity_count . ' Tours & Activities';
+        if (mb_strlen($seo_title) > 65) {
+            $seo_title = 'Things to Do in ' . $term->name . ($country_name ? ', ' . $country_name : '') . ' | ' . $activity_count . ' Activities';
         }
-        $seo_title .= ' | ' . $activity_count . ' Tours & Activities';
-        
-        // SEO Description
-        $seo_description = 'Discover ' . $activity_count . ' amazing things to do in ' . $term->name . '. ';
-        if ($country_name) {
-            $seo_description .= 'Top attractions in ' . $country_name . '. ';
+        if (mb_strlen($seo_title) > 65) {
+            $seo_title = 'Things to Do in ' . $term->name . ' | Tours & Activities';
         }
-        $seo_description .= 'Book tours, activities, tickets & experiences. Best prices & instant confirmation.';
-        
-        // Focus Keyphrase
+
+        // ── SEO Description: 150-160 chars ──────────────────────────
+        $base = 'Discover ' . $activity_count . ' top tours & activities in ' . $term->name;
+        if ($country_name) { $base .= ', ' . $country_name; }
+        $base .= '. Explore attractions, adventures & unique experiences';
+        $seo_description = self::build_meta_description(
+            $base,
+            'Book online – best prices & instant confirmation.',
+            155
+        );
+
+        // ── Keyphrases ───────────────────────────────────────────────
         $focus_keyphrase = 'things to do in ' . strtolower($term->name);
-        
+        $additional      = array_values(array_filter(array(
+            strtolower($term->name . ' tours'),
+            strtolower($term->name . ' attractions'),
+            strtolower($term->name . ' tickets'),
+            $country_name ? strtolower($term->name . ' ' . $country_name . ' activities') : '',
+        )));
+
         $hero_image = get_term_meta($term_id, 'fth_hero_image', true);
 
         self::update_term_aioseo_meta($term_id, 'travel_city', array(
             'title'                => $seo_title,
             'description'          => $seo_description,
             'focus_keyphrase'      => $focus_keyphrase,
-            'additional_keyphrases'=> array_filter(array(
-                strtolower($term->name . ' attractions'),
-                strtolower($term->name . ' tours'),
-                $country_name ? strtolower($term->name . ' ' . $country_name) : '',
-                strtolower($term->name . ' tickets'),
-            )),
+            'additional_keyphrases'=> $additional,
             'og_title'             => $seo_title,
             'og_description'       => $seo_description,
             'og_image'             => $hero_image ?: '',
@@ -339,21 +372,35 @@ class FTH_AIOSEO_Integration {
             'hide_empty' => false,
             'meta_query' => array(array('key' => 'fth_parent_country', 'value' => $term_id)),
         ));
-        $cities_count = is_array($cities) ? count($cities) : 0;
+        $cities_count = is_array($cities) && !is_wp_error($cities) ? count($cities) : 0;
+        $year         = date('Y');
 
-        $seo_title       = 'Things to Do in ' . $term->name . ' | Top Destinations & Activities';
-        $seo_description = 'Explore ' . $term->name . ' with ' . $cities_count . ' destinations. Book tours, attractions, and experiences. Best prices guaranteed.';
+        // ── SEO Title ────────────────────────────────────────────────
+        $seo_title = 'Things to Do in ' . $term->name . ' ' . $year . ' | Top Destinations';
+        if (mb_strlen($seo_title) > 65) {
+            $seo_title = 'Things to Do in ' . $term->name . ' | Top Activities';
+        }
+
+        // ── SEO Description: 150-160 chars ──────────────────────────
+        $base = 'Explore ' . $term->name . ' across ' . $cities_count . ' destinations. Discover tours, attractions & unique experiences in every city';
+        $seo_description = self::build_meta_description(
+            $base,
+            'Best prices & instant confirmation.',
+            155
+        );
+
         $focus_keyphrase = 'things to do in ' . strtolower($term->name);
 
         self::update_term_aioseo_meta($term_id, 'travel_country', array(
             'title'                => $seo_title,
             'description'          => $seo_description,
             'focus_keyphrase'      => $focus_keyphrase,
-            'additional_keyphrases'=> array(
-                strtolower($term->name . ' travel'),
+            'additional_keyphrases'=> array_filter(array(
+                strtolower($term->name . ' travel guide'),
                 strtolower($term->name . ' tours'),
                 strtolower($term->name . ' activities'),
-            ),
+                strtolower($term->name . ' attractions'),
+            )),
         ));
     }
     
@@ -691,6 +738,58 @@ class FTH_AIOSEO_Integration {
             $schema[] = $product;
         }
         
+        // Hotel Page Schema (LodgingBusiness)
+        if (is_singular('travel_hotel')) {
+            $post_id      = get_the_ID();
+            $city_name    = '';
+            $cities       = wp_get_post_terms($post_id, 'travel_city');
+            if (!empty($cities)) $city_name = $cities[0]->name;
+            $country_name = '';
+            $countries    = wp_get_post_terms($post_id, 'travel_country');
+            if (!empty($countries)) $country_name = $countries[0]->name;
+            $rating       = get_post_meta($post_id, '_fth_rating', true);
+            $review_count = get_post_meta($post_id, '_fth_review_count', true);
+            $price        = get_post_meta($post_id, '_fth_price', true);
+            $currency     = get_post_meta($post_id, '_fth_currency', true) ?: 'USD';
+            $star_rating  = get_post_meta($post_id, '_fth_star_rating', true);
+            $ext_image    = get_post_meta($post_id, '_fth_external_image', true);
+
+            $hotel_schema = array(
+                '@type'       => 'LodgingBusiness',
+                'name'        => get_the_title(),
+                'description' => get_the_excerpt() ?: wp_trim_words(get_the_content(), 50),
+                'url'         => get_permalink(),
+            );
+            if ($ext_image) {
+                $hotel_schema['image'] = $ext_image;
+            } elseif (has_post_thumbnail()) {
+                $hotel_schema['image'] = get_the_post_thumbnail_url($post_id, 'large');
+            }
+            if ($city_name) {
+                $hotel_schema['address'] = array(
+                    '@type'           => 'PostalAddress',
+                    'addressLocality' => $city_name,
+                    'addressCountry'  => $country_name ?: '',
+                );
+            }
+            if ($star_rating) {
+                $hotel_schema['starRating'] = array('@type' => 'Rating', 'ratingValue' => (int)$star_rating);
+            }
+            if ($rating && $review_count) {
+                $hotel_schema['aggregateRating'] = array(
+                    '@type'       => 'AggregateRating',
+                    'ratingValue' => floatval($rating),
+                    'reviewCount' => intval($review_count),
+                    'bestRating'  => 5,
+                    'worstRating' => 1,
+                );
+            }
+            if ($price) {
+                $hotel_schema['priceRange'] = 'From ' . $currency . ' ' . number_format((float)$price, 0);
+            }
+            $schema[] = $hotel_schema;
+        }
+
         // City Page Schema
         if (is_tax('travel_city')) {
             $term = get_queried_object();
@@ -830,6 +929,55 @@ class FTH_AIOSEO_Integration {
         return $value;
     }
     
+    /**
+     * Bulk re-apply SEO to all existing travel_activity / travel_hotel posts.
+     * Called via AJAX: wp_ajax_fth_bulk_reapply_seo
+     * Supports pagination: pass 'paged' and 'type' (activities|hotels).
+     */
+    public static function ajax_bulk_reapply_seo() {
+        check_ajax_referer('fth_admin_nonce', 'nonce');
+        if (!current_user_can('manage_options')) {
+            wp_send_json_error(array('message' => 'Permission denied.'));
+        }
+        $type    = isset($_POST['type']) ? sanitize_text_field(wp_unslash($_POST['type'])) : 'activities';
+        $paged   = max(1, (int)($_POST['paged'] ?? 1));
+        $per     = 20;
+        $cpt     = ($type === 'hotels') ? 'travel_hotel' : 'travel_activity';
+
+        $query = new WP_Query(array(
+            'post_type'      => $cpt,
+            'post_status'    => 'publish',
+            'posts_per_page' => $per,
+            'paged'          => $paged,
+            'fields'         => 'all',
+            'orderby'        => 'ID',
+            'order'          => 'ASC',
+        ));
+        $processed = 0;
+        if ($query->have_posts()) {
+            while ($query->have_posts()) {
+                $query->the_post();
+                $post_id = get_the_ID();
+                $post    = get_post($post_id);
+                if ($type === 'hotels') {
+                    self::auto_fill_hotel_seo($post_id, $post);
+                } else {
+                    self::auto_fill_activity_seo($post_id, $post);
+                }
+                $processed++;
+            }
+            wp_reset_postdata();
+        }
+        $total_pages = $query->max_num_pages;
+        wp_send_json_success(array(
+            'processed'   => $processed,
+            'paged'       => $paged,
+            'total_pages' => (int) $total_pages,
+            'done'        => $paged >= $total_pages,
+            'message'     => 'Processed ' . $processed . ' ' . $type . ' (page ' . $paged . '/' . (int)$total_pages . ').',
+        ));
+    }
+
     /**
      * Admin notice for AIO SEO integration
      */

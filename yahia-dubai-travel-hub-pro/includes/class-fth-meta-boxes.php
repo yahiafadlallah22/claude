@@ -15,7 +15,14 @@ class FTH_Meta_Boxes {
     public static function init() {
         add_action('add_meta_boxes', array(__CLASS__, 'add_meta_boxes'));
         add_action('save_post', array(__CLASS__, 'save_meta_boxes'), 10, 2);
-        
+
+        // Load media uploader on taxonomy edit screens
+        add_action('admin_enqueue_scripts', function($hook) {
+            if (in_array($hook, array('edit-tags.php', 'term.php'))) {
+                wp_enqueue_media();
+            }
+        });
+
         // Taxonomy meta
         add_action('travel_city_add_form_fields', array(__CLASS__, 'city_add_form_fields'));
         add_action('travel_city_edit_form_fields', array(__CLASS__, 'city_edit_form_fields'), 10, 2);
@@ -953,9 +960,41 @@ class FTH_Meta_Boxes {
         </tr>
         
         <tr class="form-field">
-            <th scope="row"><label for="fth_city_hero">Hero Image URL</label></th>
+            <th scope="row"><label for="fth_city_hero">Hero Image</label></th>
             <td>
-                <input type="url" id="fth_city_hero" name="fth_city_hero" value="<?php echo esc_url($hero_image); ?>">
+                <div style="display:flex;align-items:center;gap:8px;flex-wrap:wrap;">
+                    <input type="url" id="fth_city_hero" name="fth_city_hero" value="<?php echo esc_url($hero_image); ?>" style="flex:1;min-width:260px;" class="fth-city-img-url">
+                    <button type="button" class="button fth-city-media-btn" data-target="#fth_city_hero" data-preview="#fth_city_hero_preview">Choose Image</button>
+                </div>
+                <?php if ($hero_image): ?>
+                <img id="fth_city_hero_preview" src="<?php echo esc_url($hero_image); ?>" style="max-width:280px;max-height:70px;object-fit:cover;border-radius:4px;margin-top:8px;display:block;">
+                <?php else: ?>
+                <img id="fth_city_hero_preview" src="" style="max-width:280px;max-height:70px;object-fit:cover;border-radius:4px;margin-top:8px;display:none;">
+                <?php endif; ?>
+                <p class="description">Recommended: at least 1600×500px.</p>
+                <script>
+                jQuery(document).ready(function($) {
+                    if (typeof wp !== 'undefined' && wp.media) {
+                        $(document).off('click.fthmedia', '.fth-city-media-btn').on('click.fthmedia', '.fth-city-media-btn', function(e) {
+                            e.preventDefault();
+                            var target  = $(this).data('target');
+                            var preview = $(this).data('preview');
+                            var frame = wp.media({ title: 'Select Hero Image', button: { text: 'Use this image' }, multiple: false, library: { type: 'image' } });
+                            frame.on('select', function() {
+                                var a = frame.state().get('selection').first().toJSON();
+                                $(target).val(a.url);
+                                $(preview).attr('src', a.url).show();
+                            });
+                            frame.open();
+                        });
+                        $(document).on('input', '.fth-city-img-url', function() {
+                            var url = $(this).val();
+                            if (url) { $('#fth_city_hero_preview').attr('src', url).show(); }
+                            else     { $('#fth_city_hero_preview').hide(); }
+                        });
+                    }
+                });
+                </script>
             </td>
         </tr>
         
