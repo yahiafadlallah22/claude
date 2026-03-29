@@ -98,7 +98,7 @@ body.single-travel_hotel .widget-area,body.single-travel_hotel .sidebar,body.sin
 
 <div class="klh">
   <div class="klh-bc"><div class="klh-bc-in">
-    <a href="<?php echo esc_url(FTH_Templates::get_hub_url('hotels')); ?>">Hôtels</a>
+    <a href="<?php echo esc_url(FTH_Templates::get_hub_url('hotels')); ?>">Hotels</a>
     <span>›</span>
     <?php if ($country_name && $country_link): ?><a href="<?php echo esc_url($country_link); ?>"><?php echo esc_html($country_name); ?></a><span>›</span><?php endif; ?>
     <?php if ($city_name && $city_link): ?><a href="<?php echo esc_url($city_link); ?>"><?php echo esc_html($city_name); ?></a><span>›</span><?php endif; ?>
@@ -129,7 +129,7 @@ body.single-travel_hotel .widget-area,body.single-travel_hotel .sidebar,body.sin
           <span><?php echo esc_html($promo); ?></span>
         </div>
 
-        <div class="klh-badge">🏨 Hébergement</div>
+        <div class="klh-badge">🏨 Accommodation</div>
         <h1 class="klh-title"><?php the_title(); ?></h1>
         <ul class="klh-meta">
           <?php if ($city_name || $country_name): ?>
@@ -138,21 +138,21 @@ body.single-travel_hotel .widget-area,body.single-travel_hotel .sidebar,body.sin
           <?php if ($address): ?><li>🗺 <?php echo esc_html(wp_trim_words($address, 8)); ?></li><?php endif; ?>
           <?php if ($rating): ?>
           <li>⭐ <?php echo esc_html(number_format((float)$rating, 1)); ?>
-            <?php if ($review_count): ?>&nbsp;· <?php echo esc_html(number_format((int)$review_count)); ?> avis<?php endif; ?>
+            <?php if ($review_count): ?>&nbsp;· <?php echo esc_html(number_format((int)$review_count)); ?> reviews<?php endif; ?>
           </li>
           <?php endif; ?>
         </ul>
       </div>
 
       <div class="klh-section">
-        <h2 class="klh-sec-title"><span class="icon">ℹ</span> À propos de cet hôtel</h2>
+        <h2 class="klh-sec-title"><span class="icon">ℹ</span> About this hotel</h2>
         <div class="klh-content"><?php the_content(); ?></div>
-        <?php if ($address): ?><p style="margin-top:14px;font-size:14px;"><strong>Adresse :</strong> <?php echo esc_html($address); ?></p><?php endif; ?>
+        <?php if ($address): ?><p style="margin-top:14px;font-size:14px;"><strong>Address:</strong> <?php echo esc_html($address); ?></p><?php endif; ?>
       </div>
 
       <?php if (!empty($amen_list)): ?>
       <div class="klh-section">
-        <h2 class="klh-sec-title"><span class="icon">✓</span> Équipements populaires</h2>
+        <h2 class="klh-sec-title"><span class="icon">✓</span> Popular amenities</h2>
         <div class="klh-amenities">
           <?php foreach (array_slice($amen_list, 0, 16) as $amen): ?>
           <div class="klh-amenity">✓ <?php echo esc_html($amen); ?></div>
@@ -163,7 +163,7 @@ body.single-travel_hotel .widget-area,body.single-travel_hotel .sidebar,body.sin
 
       <?php if ($related->have_posts()): ?>
       <div class="klh-section">
-        <h2 class="klh-sec-title"><span class="icon">✨</span> Autres hôtels à proximité</h2>
+        <h2 class="klh-sec-title"><span class="icon">✨</span> Other hotels nearby</h2>
         <div class="klh-related-grid">
           <?php while ($related->have_posts()): $related->the_post();
             if (get_the_ID() === $post_id) continue;
@@ -178,16 +178,16 @@ body.single-travel_hotel .widget-area,body.single-travel_hotel .sidebar,body.sin
 
     <aside class="klh-sidebar">
       <div class="klh-book-box">
-        <div class="klh-price-from">À partir de</div>
+        <div class="klh-price-from">From</div>
         <?php if ($orig_price && (float)$orig_price > (float)$price): ?>
         <div class="klh-price-orig"><?php echo esc_html($sym . number_format((float)$orig_price, 2)); ?></div>
         <?php endif; ?>
         <?php if ($price): ?>
         <div class="klh-price-curr"><?php echo esc_html($sym . number_format((float)$price, 2)); ?></div>
         <?php else: ?>
-        <div class="klh-price-curr" style="font-size:24px;">Vérifier le prix</div>
+        <div class="klh-price-curr" style="font-size:24px;">Check price</div>
         <?php endif; ?>
-        <div class="klh-price-note">Par nuit · Tarifs en temps réel</div>
+        <div class="klh-price-note">Per night · Live rates</div>
         <a class="klh-cta" href="<?php echo esc_url($affiliate_link ?: '#'); ?>" target="_blank" rel="noopener noreferrer">
           🏨 <?php echo esc_html($cta_text); ?>
         </a>
@@ -195,10 +195,10 @@ body.single-travel_hotel .widget-area,body.single-travel_hotel .sidebar,body.sin
           🤝 <?php echo esc_html($promo_text); ?>
         </div>
         <div class="klh-trust">
-          <div class="klh-trust-item"><span>🏨</span><span>Chambres, localisation et équipements dans une page claire</span></div>
-          <div class="klh-trust-item"><span>📍</span><span>Informations pratiques pour comparer les hôtels rapidement</span></div>
-          <div class="klh-trust-item"><span>🔒</span><span>Réservation sécurisée via Klook</span></div>
-          <div class="klh-trust-item"><span>⚡</span><span>Confirmation immédiate de disponibilité</span></div>
+          <div class="klh-trust-item"><span>🏨</span><span>Rooms, location and amenities in one clear page</span></div>
+          <div class="klh-trust-item"><span>📍</span><span>Practical information for quick hotel comparison</span></div>
+          <div class="klh-trust-item"><span>🔒</span><span>Secure booking via Klook</span></div>
+          <div class="klh-trust-item"><span>⚡</span><span>Immediate availability confirmation</span></div>
         </div>
       </div>
     </aside>

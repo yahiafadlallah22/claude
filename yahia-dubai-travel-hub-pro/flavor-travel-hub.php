@@ -267,7 +267,7 @@ final class Flavor_Travel_Hub {
             'fth_booking_button_text' => 'ACTIVATE DISCOUNT',
             'fth_search_placeholder'  => 'Search attractions, tours and hotels...',
             'fth_scraperapi_key'      => 'ecdd48490f38ad039aace84101208f7a',
-            'fth_promo_text'          => 'Promotion exclusive négociée par Yahia Fadlallah pour vous',
+            'fth_promo_text'          => 'Exclusive deal negotiated by Yahia Fadlallah for you',
             'fth_things_hero_title'   => 'Worldwide Tours & Attractions',
             'fth_things_hero_subtitle'=> 'Discover trusted tours, attractions and experiences with a premium Yahia Dubai presentation.',
             'fth_things_hero_image'   => 'https://images.unsplash.com/photo-1476514525535-07fb3b4ae5f1?w=1920',
@@ -306,7 +306,7 @@ final class Flavor_Travel_Hub {
     }
 
     public static function get_promo_text() {
-        return get_option('fth_promo_text', 'Promotion exclusive négociée par Yahia Fadlallah pour vous');
+        return get_option('fth_promo_text', 'Exclusive deal negotiated by Yahia Fadlallah for you');
     }
 
     public static function get_cta_text() {

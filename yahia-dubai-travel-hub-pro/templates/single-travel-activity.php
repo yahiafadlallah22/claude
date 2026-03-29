@@ -173,25 +173,25 @@ body.single-travel_activity .widget-area,body.single-travel_activity .sidebar,bo
           <?php if ($duration): ?><li>⏱ <?php echo esc_html($duration); ?></li><?php endif; ?>
           <?php if ($rating): ?>
           <li>⭐ <?php echo esc_html(number_format((float)$rating, 1)); ?>
-            <?php if ($review_count): ?>&nbsp;· <?php echo esc_html(number_format((int)$review_count)); ?> avis<?php endif; ?>
+            <?php if ($review_count): ?>&nbsp;· <?php echo esc_html(number_format((int)$review_count)); ?> reviews<?php endif; ?>
           </li>
           <?php endif; ?>
-          <li>✅ Confirmation instantanée</li>
+          <li>✅ Instant confirmation</li>
         </ul>
       </div>
 
       <!-- Overview -->
       <div class="kl-section">
-        <h2 class="kl-sec-title"><span class="icon">ℹ</span> À propos de cette expérience</h2>
+        <h2 class="kl-sec-title"><span class="icon">ℹ</span> About this experience</h2>
         <div class="kl-content"><?php the_content(); ?></div>
-        <?php if ($meeting_point): ?><p style="margin-top:14px;font-size:14px;"><strong>Point de rencontre :</strong> <?php echo esc_html($meeting_point); ?></p><?php endif; ?>
+        <?php if ($meeting_point): ?><p style="margin-top:14px;font-size:14px;"><strong>Meeting point:</strong> <?php echo esc_html($meeting_point); ?></p><?php endif; ?>
       </div>
 
       <!-- Highlights -->
       <?php if ($highlights):
         $hl_lines = array_filter(array_map('trim', explode("\n", $highlights))); ?>
       <div class="kl-section">
-        <h2 class="kl-sec-title"><span class="icon">★</span> Points forts</h2>
+        <h2 class="kl-sec-title"><span class="icon">★</span> Highlights</h2>
         <ul class="kl-list">
           <?php foreach ($hl_lines as $line): ?>
           <li><span class="check">✓</span><span><?php echo esc_html($line); ?></span></li>
@@ -204,7 +204,7 @@ body.single-travel_activity .widget-area,body.single-travel_activity .sidebar,bo
       <?php if ($itinerary):
         $it_lines = array_filter(array_map('trim', explode("\n", $itinerary))); ?>
       <div class="kl-section">
-        <h2 class="kl-sec-title"><span class="icon">🗺</span> Itinéraire</h2>
+        <h2 class="kl-sec-title"><span class="icon">🗺</span> Itinerary</h2>
         <ul class="kl-list">
           <?php foreach ($it_lines as $i => $line): ?>
           <li><span class="check"><?php echo $i + 1; ?></span><span><?php echo esc_html($line); ?></span></li>
@@ -218,7 +218,7 @@ body.single-travel_activity .widget-area,body.single-travel_activity .sidebar,bo
       <div class="kl-section">
         <?php if ($inclusions):
           $inc_lines = array_filter(array_map('trim', explode("\n", $inclusions))); ?>
-        <h2 class="kl-sec-title"><span class="icon">✓</span> Ce qui est inclus</h2>
+        <h2 class="kl-sec-title"><span class="icon">✓</span> What's included</h2>
         <ul class="kl-list" style="margin-bottom:<?php echo $exclusions ? '18px' : '0'; ?>">
           <?php foreach ($inc_lines as $line): ?>
           <li><span class="check">✓</span><span><?php echo esc_html($line); ?></span></li>
@@ -227,7 +227,7 @@ body.single-travel_activity .widget-area,body.single-travel_activity .sidebar,bo
         <?php endif; ?>
         <?php if ($exclusions):
           $exc_lines = array_filter(array_map('trim', explode("\n", $exclusions))); ?>
-        <h2 class="kl-sec-title" style="margin-top:18px;"><span class="icon">✕</span> Non inclus</h2>
+        <h2 class="kl-sec-title" style="margin-top:18px;"><span class="icon">✕</span> Not included</h2>
         <ul class="kl-list">
           <?php foreach ($exc_lines as $line): ?>
           <li><span class="check cross">✕</span><span><?php echo esc_html($line); ?></span></li>
@@ -241,7 +241,7 @@ body.single-travel_activity .widget-area,body.single-travel_activity .sidebar,bo
       <?php if ($faq_raw):
         $faq_blocks = array_filter(array_map('trim', explode("\n\n", $faq_raw))); ?>
       <div class="kl-section">
-        <h2 class="kl-sec-title"><span class="icon">❓</span> Questions fréquentes</h2>
+        <h2 class="kl-sec-title"><span class="icon">❓</span> Frequently asked questions</h2>
         <?php foreach ($faq_blocks as $block):
           if (preg_match('/^Q:\s*(.+)/u', $block, $mq) && preg_match('/\nA:\s*(.+)/us', $block, $ma)): ?>
           <div class="kl-faq-item">
@@ -258,7 +258,7 @@ body.single-travel_activity .widget-area,body.single-travel_activity .sidebar,bo
       <!-- Related -->
       <?php if ($related->have_posts()): ?>
       <div class="kl-section">
-        <h2 class="kl-sec-title"><span class="icon">✨</span> Expériences similaires à proximité</h2>
+        <h2 class="kl-sec-title"><span class="icon">✨</span> Similar experiences nearby</h2>
         <div class="kl-related-grid">
           <?php while ($related->have_posts()): $related->the_post();
             if (get_the_ID() === $post_id) continue;
@@ -274,16 +274,16 @@ body.single-travel_activity .widget-area,body.single-travel_activity .sidebar,bo
     <!-- ── Sidebar ─────────────────────────────────────────── -->
     <aside class="kl-sidebar">
       <div class="kl-book-box">
-        <div class="kl-price-from">À partir de</div>
+        <div class="kl-price-from">From</div>
         <?php if ($orig_price && (float)$orig_price > (float)$price): ?>
         <div class="kl-price-orig"><?php echo esc_html($sym . number_format((float)$orig_price, 2)); ?></div>
         <?php endif; ?>
         <?php if ($price): ?>
         <div class="kl-price-curr"><?php echo esc_html($sym . number_format((float)$price, 2)); ?></div>
         <?php else: ?>
-        <div class="kl-price-curr" style="font-size:24px;">Vérifier le prix</div>
+        <div class="kl-price-curr" style="font-size:24px;">Check price</div>
         <?php endif; ?>
-        <div class="kl-price-note">Prix par personne · Confirmation instantanée</div>
+        <div class="kl-price-note">Per person · Instant confirmation</div>
         <a class="kl-cta" href="<?php echo esc_url($affiliate_link ?: '#'); ?>" target="_blank" rel="noopener noreferrer">
           🎟 <?php echo esc_html($cta_text); ?>
         </a>
@@ -291,10 +291,10 @@ body.single-travel_activity .widget-area,body.single-travel_activity .sidebar,bo
           🤝 <?php echo esc_html($promo_text); ?>
         </div>
         <div class="kl-trust">
-          <div class="kl-trust-item"><span class="kl-trust-icon">🎟️</span><span>Billets &amp; disponibilités visibles en temps réel</span></div>
-          <div class="kl-trust-item"><span class="kl-trust-icon">📍</span><span>Lieu de rendez-vous et informations pratiques</span></div>
-          <div class="kl-trust-item"><span class="kl-trust-icon">🔒</span><span>Réservation sécurisée – remboursement disponible</span></div>
-          <div class="kl-trust-item"><span class="kl-trust-icon">⚡</span><span>Accès instantané après paiement</span></div>
+          <div class="kl-trust-item"><span class="kl-trust-icon">🎟️</span><span>Tickets &amp; availability visible in real time</span></div>
+          <div class="kl-trust-item"><span class="kl-trust-icon">📍</span><span>Meeting point and practical information</span></div>
+          <div class="kl-trust-item"><span class="kl-trust-icon">🔒</span><span>Secure booking – refund available</span></div>
+          <div class="kl-trust-item"><span class="kl-trust-icon">⚡</span><span>Instant access after payment</span></div>
         </div>
       </div>
     </aside>
