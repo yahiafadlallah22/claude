@@ -181,6 +181,60 @@ private static function build_affiliate_redirect($url) {
 }
 
 /**
+ * Fetch a Klook LISTING page for link extraction only.
+ *
+ * Much faster than fetch_klook_html() — skips render=true ScraperAPI and
+ * Wayback Machine because listing pages only need basic HTML to extract hrefs.
+ * Tries: 1. Direct cURL  2. ScraperAPI (no render)  3. ScraperAPI (render, capped 60s)
+ *
+ * @param  string $url  Klook listing/destination URL
+ * @return string       Raw HTML body (may be empty on total failure)
+ */
+private static function fetch_klook_listing_html($url) {
+    // 1. Direct cURL — fast, often works for listing pages
+    $r = self::remote_get($url, array('timeout' => 20));
+    if (!is_wp_error($r)) {
+        $b = wp_remote_retrieve_body($r);
+        // Accept if we got a real page (contains activity links or Next data)
+        if (!empty($b) && (strpos($b, 'klook.com/activity/') !== false || strpos($b, 'klook.com/en-US/activity/') !== false || strpos($b, '__NEXT_DATA__') !== false)) {
+            return $b;
+        }
+    }
+
+    // 2. ScraperAPI without render (fast, ~5s, bypasses basic Cloudflare)
+    $sa_key = self::get_scraperapi_key();
+    if (!empty($sa_key)) {
+        $sa_url = 'https://api.scraperapi.com?' . http_build_query(array(
+            'api_key'      => $sa_key,
+            'url'          => $url,
+            'country_code' => 'us',
+        ));
+        $sa_r = self::remote_get($sa_url, array('timeout' => 35));
+        if (!is_wp_error($sa_r)) {
+            $sa_b = wp_remote_retrieve_body($sa_r);
+            if (!empty($sa_b) && (strpos($sa_b, 'klook.com/activity/') !== false || strpos($sa_b, '__NEXT_DATA__') !== false)) {
+                return $sa_b;
+            }
+        }
+
+        // 3. ScraperAPI with render=true as last resort (but capped at 60s not 120s)
+        $sa_url2 = 'https://api.scraperapi.com?' . http_build_query(array(
+            'api_key'      => $sa_key,
+            'url'          => $url,
+            'render'       => 'true',
+            'country_code' => 'us',
+        ));
+        $sa_r2 = self::remote_get($sa_url2, array('timeout' => 60));
+        if (!is_wp_error($sa_r2)) {
+            $sa_b2 = wp_remote_retrieve_body($sa_r2);
+            if (!empty($sa_b2)) return $sa_b2;
+        }
+    }
+
+    return '';
+}
+
+/**
  * Fetch a Klook page HTML with multiple bypass strategies for Cloudflare.
  *
  * Tries (in order):
@@ -1142,40 +1196,43 @@ public static function discover_import_urls() {
         self::send_json_error_clean('Please enter a destination URL');
     }
     $real_url = self::extract_real_klook_url($url);
+    // Normalise locale to en-US
     if (strpos($real_url, 'klook.com') !== false) {
         $real_url = preg_replace('#(https?://(?:www\.)?klook\.com)/[a-z]{2}[-_][A-Za-z]{2,4}/#', '$1/en-US/', $real_url);
         if (!preg_match('#klook\.com/en-US/#', $real_url)) {
             $real_url = preg_replace('#(https?://(?:www\.)?klook\.com)/#', '$1/en-US/', $real_url);
         }
     }
-    $candidate_urls = array($real_url);
-    $no_locale = preg_replace('#/en-US/#', '/', $real_url);
-    if ($no_locale !== $real_url) $candidate_urls[] = $no_locale;
-    if (strpos($real_url, '/destination/') !== false) {
-        $candidate_urls[] = trailingslashit($real_url) . '1-things-to-do/';
-        $candidate_urls[] = trailingslashit($real_url) . '2-tours/';
+    // For destination URLs without tab suffix, add the activities tab
+    $base_listing = $real_url;
+    if (strpos($real_url, '/destination/') !== false && !preg_match('#/\d+-[a-z]#', $real_url)) {
+        $base_listing = trailingslashit($real_url) . ($type === 'hotel' ? '3-hotel/' : '1-things-to-do/');
     }
-    $expanded = array();
-    foreach (array_unique($candidate_urls) as $cu) {
-        $expanded[] = $cu;
-        for ($page = 2; $page <= 10; $page++) {
-            $expanded[] = add_query_arg('page', $page, $cu);
+
+    $pool_target = max($limit * 3, 60);
+    $all_links   = array();
+
+    // Scan pages sequentially using the fast listing fetcher (no render=true for listing pages)
+    for ($page = 1; $page <= 12; $page++) {
+        $page_url = $page === 1 ? $base_listing : add_query_arg('page', $page, $base_listing);
+        $body     = self::fetch_klook_listing_html($page_url);
+        if (empty($body)) {
+            // Try without en-US locale on first page failure
+            if ($page === 1) {
+                $alt = preg_replace('#/en-US/#', '/', $page_url);
+                if ($alt !== $page_url) $body = self::fetch_klook_listing_html($alt);
+            }
+            if (empty($body)) break; // stop paginating on consecutive failures
         }
-    }
-    $pool_target = max($limit * 4, 200);
-    $all_links = array();
-    foreach (array_unique($expanded) as $cu) {
-        $fetch = self::fetch_klook_html($cu);
-        $body  = $fetch['body'];
-        if (empty($body)) continue;
-        if ($type === 'hotel') {
-            $all_links = array_merge($all_links, self::extract_hotel_links_from_html($body));
-        } else {
-            $all_links = array_merge($all_links, self::extract_activity_links_from_html($body));
-        }
+        $page_links = $type === 'hotel'
+            ? self::extract_hotel_links_from_html($body)
+            : self::extract_activity_links_from_html($body);
+        if (empty($page_links)) break; // no more results on this page
+        $all_links = array_merge($all_links, $page_links);
         if (count(array_unique($all_links)) >= $pool_target) break;
     }
-    // CDX fallback
+
+    // CDX fallback (Wayback Machine index) if direct scan yielded nothing
     if (empty($all_links)) {
         $city_slug_cdx = '';
         if (preg_match('#/destination/c\d+-([a-z0-9-]+)#i', $real_url, $csm)) {
@@ -1971,6 +2028,29 @@ public static function import_bulk_city() {
                 }
             }
         }
+        // Auto-detect category from Klook data if not manually selected
+        if (empty($params['category']) && !empty($data['klook_categories'])) {
+            foreach ($data['klook_categories'] as $cat_name) {
+                $cat_name = sanitize_text_field(trim($cat_name));
+                if (empty($cat_name)) continue;
+                // Find existing term by name or slug
+                $existing = get_term_by('name', $cat_name, 'travel_category');
+                if (!$existing) {
+                    $existing = get_term_by('slug', sanitize_title($cat_name), 'travel_category');
+                }
+                if ($existing && !is_wp_error($existing)) {
+                    $params['category'] = $existing->term_id;
+                } else {
+                    $new_term = wp_insert_term($cat_name, 'travel_category', array('slug' => sanitize_title($cat_name)));
+                    if (!is_wp_error($new_term)) {
+                        $params['category'] = $new_term['term_id'];
+                        self::generate_category_seo_meta($new_term['term_id']);
+                    }
+                }
+                if (!empty($params['category'])) break;
+            }
+        }
+
         if (!empty($params['category'])) {
             wp_set_object_terms($post_id, intval($params['category']), 'travel_category');
             self::generate_category_seo_meta(intval($params['category']));
@@ -2947,25 +3027,26 @@ public static function import_bulk_city() {
      */
     private static function parse_klook_html($html, $url, $activity_id) {
         $data = array(
-            'title'          => '',
-            'description'    => '',
-            'excerpt'        => '',
-            'price'          => '',
-            'original_price' => '',
-            'currency'       => 'USD',
-            'rating'         => '',
-            'review_count'   => '',
-            'duration'       => '',
-            'highlights'     => '',
-            'inclusions'     => '',
-            'exclusions'     => '',
-            'meeting_point'  => '',
-            'itinerary'      => '',
-            'promo'          => '',
-            'image'          => '',
-            'images'         => array(),
-            'affiliate_link' => '',
-            'activity_id'    => $activity_id,
+            'title'            => '',
+            'description'      => '',
+            'excerpt'          => '',
+            'price'            => '',
+            'original_price'   => '',
+            'currency'         => 'USD',
+            'rating'           => '',
+            'review_count'     => '',
+            'duration'         => '',
+            'highlights'       => '',
+            'inclusions'       => '',
+            'exclusions'       => '',
+            'meeting_point'    => '',
+            'itinerary'        => '',
+            'promo'            => '',
+            'image'            => '',
+            'images'           => array(),
+            'affiliate_link'   => '',
+            'activity_id'      => $activity_id,
+            'klook_categories' => array(), // auto-detected from Klook tags/categories
         );
         
         // Build affiliate link
@@ -3140,6 +3221,68 @@ if (preg_match('/<script[^>]*id=["\']__NEXT_DATA__["\'][^>]*>(.*?)<\/script>/si'
                 if (empty($data['image'])) {
                     $data['image'] = $data['images'][0];
                 }
+            }
+        }
+
+        // ── Category / Tag extraction from __NEXT_DATA__ ──────────────────
+        if (empty($data['klook_categories'])) {
+            $raw_cats = array();
+
+            // Broad key search across the whole props tree
+            $cat_keys = array(
+                'activityTags','tags','tagList','labelList','categoryList',
+                'activityCategory','activityType','subCategory','category',
+                'mainCategory','typeList','activityTypeList',
+            );
+            $found_cats = self::array_find_first($next_props, $cat_keys);
+
+            // Also look in breadcrumbs: [Home] > [Category] > [Title]
+            $breadcrumbs = self::array_find_first($next_props, array('breadcrumbs','breadcrumb','breadcrumbList'));
+            if (!empty($breadcrumbs) && is_array($breadcrumbs)) {
+                foreach (array_slice($breadcrumbs, 1, 3) as $crumb) { // skip first (Home)
+                    $crumb_name = '';
+                    if (is_array($crumb)) {
+                        $crumb_name = self::normalize_text_block(self::array_find_first($crumb, array('name','title','label','text')));
+                    } elseif (is_string($crumb)) {
+                        $crumb_name = trim($crumb);
+                    }
+                    // Skip the activity title itself (usually the last breadcrumb)
+                    if ($crumb_name && $crumb_name !== $data['title']) {
+                        $raw_cats[] = $crumb_name;
+                    }
+                }
+            }
+
+            if (!empty($found_cats)) {
+                if (is_string($found_cats) && strlen(trim($found_cats)) > 1) {
+                    $raw_cats[] = trim($found_cats);
+                } elseif (is_array($found_cats)) {
+                    foreach ($found_cats as $cat_item) {
+                        if (is_string($cat_item) && strlen(trim($cat_item)) > 1) {
+                            $raw_cats[] = trim($cat_item);
+                        } elseif (is_array($cat_item)) {
+                            $cn = self::normalize_text_block(self::array_find_first($cat_item, array('name','tagName','label','title','text','value','categoryName')));
+                            if ($cn && strlen($cn) > 1) $raw_cats[] = $cn;
+                        }
+                    }
+                }
+            }
+
+            // Generic words to skip (too broad to be useful as categories)
+            $skip_cats = array(
+                'things to do','activities','tours','attraction','book','klook',
+                'hot','popular','new','recommended','best','top','all','other',
+                'experience','experiences','home','see all',
+            );
+            $clean_cats = array();
+            foreach ($raw_cats as $c) {
+                $c = wp_strip_all_tags(trim($c));
+                if (strlen($c) < 2 || strlen($c) > 60) continue;
+                if (in_array(strtolower($c), $skip_cats, true)) continue;
+                if (!in_array($c, $clean_cats, true)) $clean_cats[] = $c;
+            }
+            if (!empty($clean_cats)) {
+                $data['klook_categories'] = array_slice($clean_cats, 0, 4);
             }
         }
     }

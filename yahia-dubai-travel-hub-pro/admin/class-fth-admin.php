@@ -816,9 +816,9 @@ class FTH_Admin {
             </select>
         </div>
         <div>
-            <label style="display: block; margin-bottom: 8px; font-weight: 600;">Category</label>
+            <label style="display: block; margin-bottom: 8px; font-weight: 600;">Category <span style="font-weight:400;opacity:0.75;">(auto from Klook)</span></label>
             <select id="fth_bulk_category" style="width: 100%; padding: 10px; border: none; border-radius: 6px;">
-                <option value="">Select Category</option>
+                <option value="">Auto-detect from Klook</option>
                 <?php foreach ($categories as $cat): ?>
                     <option value="<?php echo esc_attr($cat->term_id); ?>"><?php echo esc_html($cat->name); ?></option>
                 <?php endforeach; ?>
