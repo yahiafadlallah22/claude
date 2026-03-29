@@ -547,6 +547,9 @@ private static function is_valid_content_image_url($url) {
         'apple-touch-icon', 'app-store', 'google-play', '/badge', '/tag/',
         '/label/', 'category-icon', '/flag/', 'star-rating', 'review-badge',
         '/ui/', '/button/', 'payment-', 'visa-', 'mastercard-',
+        // Non-activity images: user profiles, partner logos, reviewer photos
+        '/profile/', '/reviewer/', 'review-avatar', '/partner-', 'profile-photo', '/user-icon',
+        '/staff/', '/team/', '/author-', '-author-',
     );
     foreach ($blocked as $word) {
         if (stripos($url, $word) !== false) {
@@ -555,9 +558,10 @@ private static function is_valid_content_image_url($url) {
     }
     // Klook CDN — extra filtering for small/icon transformations
     if (stripos($url, 'res.klook.com') !== false) {
-        // Reject if explicit width or height < 300 (thumbnail/icon)
+        // Reject if explicit width or height < 400 (thumbnail/icon) – after upgrade
+        // un-upgraded URLs with small dims still get filtered here
         if (preg_match('#[,/](?:w|h)_(\d+)#', $url, $dim_m)) {
-            if ((int) $dim_m[1] < 300) {
+            if ((int) $dim_m[1] < 400) {
                 return false;
             }
         }
@@ -577,6 +581,10 @@ private static function clean_image_urls($urls, $limit = 5) {
     $rest     = array();
     foreach ((array) $urls as $url) {
         $url = esc_url_raw(html_entity_decode((string) $url, ENT_QUOTES, 'UTF-8'));
+        // ── Upgrade Klook Cloudinary URLs to 1080×720 BEFORE filtering ──────
+        // This normalises all size-variants of the same photo to an identical URL,
+        // so the deduplication below removes them correctly.
+        $url = self::upgrade_klook_image_url($url);
         if (!$url || !self::is_valid_content_image_url($url)) {
             continue;
         }
@@ -693,6 +701,21 @@ private static function maybe_hotel_price($value) {
 private static function image_compare_key($url) {
     $url = preg_replace('/\?.*$/', '', (string) $url);
     return strtolower(trim($url));
+}
+
+/**
+ * Upgrade Klook Cloudinary CDN URLs to full-size (1080×720) so all variants
+ * of the same photo produce the same URL after normalisation, enabling
+ * reliable deduplication.
+ */
+private static function upgrade_klook_image_url($url) {
+    if (stripos($url, 'res.klook.com/image/upload/') !== false) {
+        // Replace every Cloudinary transform segment (e.g. "c_fill,w_400,h_267/")
+        // with one high-quality setting. Transform segments start with a short
+        // lowercase prefix followed by underscore (c_, w_, h_, q_, fl_, ar_…).
+        $url = preg_replace('#(/image/upload/)(?:[a-z][a-z_0-9]{0,3}_[^/]+/)+#', '$1q_85,c_fill,w_1080,h_720/', $url);
+    }
+    return $url;
 }
 
 private static function normalize_price_amount($value, $minimum = 1) {
@@ -1147,34 +1170,39 @@ private static function import_post_images($post_id, $main_image, $gallery = arr
         // else: external URL is already saved above, templates display via proxy
     }
 
-    $gallery_urls = array();
+    $gallery_deduped = array();
     foreach ((array) $gallery as $img) {
         if (!$img || self::image_compare_key($img) === $main_key) {
-            continue;
+            continue; // skip main image (already upgraded & compared)
         }
-        $gallery_urls[] = esc_url_raw($img);
-        if (count($gallery_urls) >= 6) {
+        $gallery_deduped[] = $img;
+        if (count($gallery_deduped) >= 6) {
             break;
         }
     }
-    $gallery_index = 2;
-    if (!empty($gallery_urls)) {
-        foreach ($gallery_urls as $img) {
-            $gallery_seo = $seo_base . '-photo-' . $gallery_index++;
-            $gallery_id  = self::sideload_image_with_referer($img, $post_id, 'https://www.klook.com', $gallery_seo);
-            if (!is_wp_error($gallery_id) && $gallery_id) {
-                $gallery_id = (int) $gallery_id;
-                if (!in_array($gallery_id, $gallery_attachment_ids, true)) {
-                    $gallery_attachment_ids[] = $gallery_id;
-                    $all_attachment_ids[]     = $gallery_id;
-                }
+    // Sideload each gallery image; only store external URL as fallback when sideload fails
+    $gallery_index    = 2;
+    $external_fallback = array();
+    foreach ($gallery_deduped as $img) {
+        $gallery_seo = $seo_base . '-photo-' . $gallery_index++;
+        $gallery_id  = self::sideload_image_with_referer($img, $post_id, 'https://www.klook.com', $gallery_seo);
+        if (!is_wp_error($gallery_id) && $gallery_id) {
+            $gallery_id = (int) $gallery_id;
+            if (!in_array($gallery_id, $gallery_attachment_ids, true)) {
+                $gallery_attachment_ids[] = $gallery_id;
+                $all_attachment_ids[]     = $gallery_id;
             }
-        }
-        update_post_meta($post_id, '_fth_external_gallery', implode(',', $gallery_urls));
-        if (!empty($gallery_attachment_ids)) {
-            update_post_meta($post_id, '_fth_gallery', implode(',', $gallery_attachment_ids));
+        } else {
+            // Sideload failed – keep as external URL so the template can show it via proxy
+            $external_fallback[] = $img;
         }
     }
+    // Persist: WP attachment IDs for successfully sideloaded images,
+    // external URLs ONLY for those that failed (no duplication with thumbnail).
+    if (!empty($gallery_attachment_ids)) {
+        update_post_meta($post_id, '_fth_gallery', implode(',', $gallery_attachment_ids));
+    }
+    update_post_meta($post_id, '_fth_external_gallery', implode(',', $external_fallback));
     if (!empty($all_attachment_ids)) {
         update_post_meta($post_id, '_fth_imported_attachment_ids', implode(',', array_unique($all_attachment_ids)));
     }
@@ -2032,6 +2060,48 @@ public static function import_bulk_city() {
                 }
             }
         }
+        // ── Auto-generate city FAQ on first import ───────────────────────────
+        if (!empty($params['city'])) {
+            $city_faq_id = intval($params['city']);
+            if (!get_term_meta($city_faq_id, '_fth_faq', true)) {
+                $ct_obj  = get_term($city_faq_id, 'travel_city');
+                $co_obj  = (!empty($params['country'])) ? get_term(intval($params['country']), 'travel_country') : null;
+                if ($ct_obj && !is_wp_error($ct_obj)) {
+                    $cn = $ct_obj->name;
+                    $co = ($co_obj && !is_wp_error($co_obj)) ? $co_obj->name : '';
+                    $city_faqs = array(
+                        "Q: What are the best things to do in {$cn}?\nA: {$cn} offers a wide variety of activities including cultural experiences, outdoor adventures, guided tours, and family-friendly excursions. Browse our curated list of top-rated experiences.",
+                        "Q: When is the best time to visit {$cn}?\nA: The best time to visit {$cn} depends on your preferences. Check local weather guides and book activities in advance for the best availability and prices.",
+                        "Q: How do I book activities in {$cn}?\nA: Browse and book all activities directly on this page. Clicking any activity takes you to the secure Klook booking page for instant confirmation.",
+                        "Q: Are the prices for {$cn} activities up to date?\nA: Yes, prices are updated regularly and reflect current Klook rates including any available promotions and discounts.",
+                        "Q: Do I need to pre-book activities in {$cn}?\nA: Pre-booking is highly recommended for popular activities. Many experiences sell out quickly, especially during peak season.",
+                    );
+                    if ($co) {
+                        $city_faqs[] = "Q: Do I need a visa to visit {$cn}, {$co}?\nA: Visa requirements vary by nationality. Always check with your local embassy or official government travel advisories before your trip to {$co}.";
+                    }
+                    update_term_meta($city_faq_id, '_fth_faq', implode("\n\n", $city_faqs));
+                }
+            }
+        }
+        // ── Auto-generate country FAQ on first import ────────────────────────
+        if (!empty($params['country'])) {
+            $cntry_faq_id = intval($params['country']);
+            if (!get_term_meta($cntry_faq_id, '_fth_faq', true)) {
+                $co_obj = get_term($cntry_faq_id, 'travel_country');
+                if ($co_obj && !is_wp_error($co_obj)) {
+                    $co = $co_obj->name;
+                    $country_faqs = array(
+                        "Q: What are the top tourist destinations in {$co}?\nA: {$co} is home to many incredible destinations. Explore our curated activities and tours in each city for an unforgettable experience.",
+                        "Q: What is the currency used in {$co}?\nA: Currency information varies by region. We recommend checking the latest exchange rates and accepted payment methods before your trip.",
+                        "Q: How do I get around in {$co}?\nA: Transportation options vary by region. Many activities include transfers; check each listing for included transport details.",
+                        "Q: Are activities in {$co} suitable for families?\nA: Yes, many activities in {$co} are family-friendly. Each listing clearly indicates the recommended age group and suitability.",
+                        "Q: What languages are spoken in {$co}?\nA: Official and commonly spoken languages vary across {$co}. Activity guides are generally available in multiple languages for international visitors.",
+                    );
+                    update_term_meta($cntry_faq_id, '_fth_faq', implode("\n\n", $country_faqs));
+                }
+            }
+        }
+
         // Auto-detect category from Klook data if not manually selected
         if (empty($params['category']) && !empty($data['klook_categories'])) {
             foreach ($data['klook_categories'] as $cat_name) {
@@ -2044,10 +2114,18 @@ public static function import_bulk_city() {
                 }
                 if ($existing && !is_wp_error($existing)) {
                     $params['category'] = $existing->term_id;
+                    // Backfill icon if not yet set
+                    if (!get_term_meta($existing->term_id, 'fth_icon', true) && class_exists('FTH_Templates')) {
+                        update_term_meta($existing->term_id, 'fth_icon', FTH_Templates::get_category_emoji($cat_name));
+                    }
                 } else {
                     $new_term = wp_insert_term($cat_name, 'travel_category', array('slug' => sanitize_title($cat_name)));
                     if (!is_wp_error($new_term)) {
                         $params['category'] = $new_term['term_id'];
+                        // Auto-assign emoji icon for the new category
+                        if (class_exists('FTH_Templates')) {
+                            update_term_meta($new_term['term_id'], 'fth_icon', FTH_Templates::get_category_emoji($cat_name));
+                        }
                         self::generate_category_seo_meta($new_term['term_id']);
                     }
                 }
@@ -3123,9 +3201,44 @@ if ($next_data_raw !== '') {
         }
 
         if (empty($data['itinerary'])) {
-            $it_text = self::bullet_lines(self::array_find_first($next_props, array('itinerary', 'itineraries', 'schedule', 'packages', 'packageInfo')), 10);
-            if ($it_text !== '') {
-                $data['itinerary'] = $it_text;
+            $it_keys = array('itinerary','itineraries','schedule','dayByDay','tourItinerary','timeline','routeInfo','activitySchedule','stops','waypoints','tourStops');
+            $it_raw  = self::array_find_first($next_props, $it_keys);
+            if (!empty($it_raw)) {
+                $it_lines = array();
+                if (is_array($it_raw)) {
+                    foreach (array_slice((array) $it_raw, 0, 12) as $step) {
+                        if (is_string($step) && trim($step) !== '') {
+                            $it_lines[] = trim($step);
+                        } elseif (is_array($step)) {
+                            $title = self::normalize_text_block(self::array_find_first($step, array('title','name','locationName','attractionName','activityName','stop','label','place')));
+                            $desc  = self::normalize_text_block(self::array_find_first($step, array('description','content','detail','note','duration','time','hint','info')));
+                            if ($title) {
+                                $it_lines[] = $title . ($desc ? ' – ' . wp_trim_words($desc, 14, '...') : '');
+                            }
+                        }
+                    }
+                } elseif (is_string($it_raw)) {
+                    $it_lines = array_filter(array_map('trim', preg_split('/\r\n|\n|[•\-]/', $it_raw)));
+                }
+                if (!empty($it_lines)) {
+                    $data['itinerary'] = implode("\n", array_slice($it_lines, 0, 12));
+                }
+            }
+            // Fallback: package/sku names as itinerary steps
+            if (empty($data['itinerary'])) {
+                $pkg_raw = self::array_find_first($next_props, array('packages','packageList','packageInfo'));
+                if (is_array($pkg_raw)) {
+                    $it_lines = array();
+                    foreach (array_slice((array) $pkg_raw, 0, 10) as $step) {
+                        if (is_array($step)) {
+                            $title = self::normalize_text_block(self::array_find_first($step, array('name','title','packageName','packageTitle')));
+                            if ($title) $it_lines[] = $title;
+                        }
+                    }
+                    if (!empty($it_lines)) {
+                        $data['itinerary'] = implode("\n", $it_lines);
+                    }
+                }
             }
         }
 
@@ -3161,7 +3274,7 @@ if ($next_data_raw !== '') {
         }
 
         if (empty($data['original_price'])) {
-            $orig_candidate = self::array_find_first($next_props, array('originalPrice','marketPrice','strikePrice','retailPrice','crossedPrice'));
+            $orig_candidate = self::array_find_first($next_props, array('originalPrice','marketPrice','strikePrice','retailPrice','crossedPrice','listPrice','originalListPrice'));
             if (is_array($orig_candidate)) {
                 $orig_candidate = self::array_find_first($orig_candidate, array('amount','value','formatValue','displayPrice'));
             }
@@ -3170,6 +3283,33 @@ if ($next_data_raw !== '') {
                 if ($op !== '') $data['original_price'] = $op;
             }
         }
+
+        // ── Fallback price search in common Klook price containers ──────────
+        if (empty($data['price'])) {
+            foreach (array('priceInfo','pricing','skuList','packageList','priceDetail','priceMap') as $pcon) {
+                $pnode = self::array_find_first($next_props, array($pcon));
+                if (empty($pnode)) continue;
+                // If a list, take the first item
+                if (is_array($pnode) && isset($pnode[0])) $pnode = $pnode[0];
+                if (!is_array($pnode)) continue;
+                $sp = self::array_find_first($pnode, array('sellPrice','salePrice','discountPrice','price','amount','fromPrice','minSellingPrice','lowestPrice'));
+                if (!empty($sp)) {
+                    $pv = self::normalize_price_amount($sp, 1);
+                    if ($pv !== '') {
+                        $data['price'] = $pv;
+                        if (empty($data['original_price'])) {
+                            $op = self::array_find_first($pnode, array('originalPrice','crossedPrice','marketPrice','strikePrice','retailPrice','listPrice'));
+                            if (!empty($op)) {
+                                $ov = self::normalize_price_amount($op, 1);
+                                if ($ov !== '') $data['original_price'] = $ov;
+                            }
+                        }
+                        break;
+                    }
+                }
+            }
+        }
+
         // Extract FAQ if available
         if (empty($data['faq'])) {
             $faq_candidate = self::array_find_first($next_props, array('faq','faqs','faqList','questionAnswer','qAndA'));

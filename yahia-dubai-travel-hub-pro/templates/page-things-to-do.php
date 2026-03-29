@@ -11,31 +11,8 @@ $hero_title    = get_option('fth_things_hero_title', 'Worldwide Tours & Attracti
 $hero_subtitle = get_option('fth_things_hero_subtitle', 'Discover unique experiences worldwide – curated by Yahia Dubai.');
 $hero_image    = get_option('fth_things_hero_image', 'https://images.unsplash.com/photo-1476514525535-07fb3b4ae5f1?w=1920');
 
-// Klook category icons map
-$cat_icons = array(
-    'things-to-do'        => '🗺️',
-    'tours'               => '🚌',
-    'attractions'         => '🎡',
-    'culture'             => '🏛️',
-    'food'                => '🍜',
-    'adventure'           => '🏔️',
-    'water-sports'        => '🏄',
-    'cruises'             => '⛵',
-    'shows'               => '🎭',
-    'theme-parks'         => '🎢',
-    'sports'              => '⚽',
-    'photography'         => '📸',
-    'transfer'            => '🚗',
-    'wellness'            => '💆',
-    'outdoor'             => '🌿',
-    'museums'             => '🎨',
-    'nightlife'           => '🌙',
-    'desert'              => '🐪',
-    'beaches'             => '🏖️',
-    'skydiving'           => '🪂',
-    'helicopter'          => '🚁',
-    'cooking'             => '👨‍🍳',
-);
+// Category icons resolved via shared FTH_Templates::get_category_emoji()
+// (legacy inline array removed – all slugs now handled centrally)
 
 // Fetch data
 $all_countries  = FTH_Taxonomies::get_countries(array('hide_empty' => false));
@@ -196,11 +173,11 @@ body.page .widget-area,body.page .sidebar,body.page .right_sidebar,body.page .pa
       <a class="klp-cat-btn active" href="<?php echo esc_url(FTH_Templates::get_hub_url('things-to-do')); ?>">
         <span class="cat-icon">🌍</span><span>All</span>
       </a>
-      <?php foreach (array_slice((array)$all_categories, 0, 14) as $cat):
-        $icon = $cat_icons[$cat->slug] ?? '🎯';
+      <?php foreach (array_slice((array)$all_categories, 0, 18) as $cat):
+        $icon = get_term_meta($cat->term_id, 'fth_icon', true) ?: FTH_Templates::get_category_emoji($cat);
       ?>
       <a class="klp-cat-btn" href="<?php echo esc_url(add_query_arg(array('fth_category' => $cat->slug, 'fth_mode' => 'activities'), FTH_Templates::get_hub_url('things-to-do'))); ?>">
-        <span class="cat-icon"><?php echo $icon; ?></span>
+        <span class="cat-icon"><?php echo esc_html($icon); ?></span>
         <span><?php echo esc_html($cat->name); ?></span>
       </a>
       <?php endforeach; ?>

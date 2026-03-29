@@ -829,6 +829,16 @@ class FTH_Admin {
             <input type="number" id="fth_bulk_limit" value="60" min="1" max="200" style="width: 100%; padding: 10px; border: none; border-radius: 6px;">
         </div>
     </div>
+    <div style="display:flex;gap:20px;flex-wrap:wrap;margin-bottom:10px;">
+        <label style="display:flex;align-items:center;gap:7px;font-size:13px;color:#fff;font-weight:600;cursor:pointer;">
+            <input type="checkbox" id="fth_bulk_featured" value="1" style="width:16px;height:16px;accent-color:#fff;">
+            ⭐ Mark as Featured
+        </label>
+        <label style="display:flex;align-items:center;gap:7px;font-size:13px;color:#fff;font-weight:600;cursor:pointer;">
+            <input type="checkbox" id="fth_bulk_popular" value="1" style="width:16px;height:16px;accent-color:#fff;">
+            🔥 Mark as Popular
+        </label>
+    </div>
     <div style="display:flex;align-items:center;gap:14px;flex-wrap:wrap;">
         <button type="button" id="fth_bulk_import_btn" class="button" style="background: #fff; color: #2575fc; border: none; padding: 12px 30px; font-size: 16px; font-weight: 700; border-radius: 6px; cursor: pointer;">
             ⚡ Import Activities Live
@@ -918,6 +928,16 @@ class FTH_Admin {
                             <label style="display: block; margin-bottom: 8px; font-weight: 600;">Limit</label>
                             <input type="number" id="fth_bulk_hotel_limit" value="12" min="1" max="120" style="width: 100%; padding: 10px; border: none; border-radius: 6px;">
                         </div>
+                    </div>
+                    <div style="display:flex;gap:20px;flex-wrap:wrap;margin-bottom:10px;">
+                        <label style="display:flex;align-items:center;gap:7px;font-size:13px;color:#fff;font-weight:600;cursor:pointer;">
+                            <input type="checkbox" id="fth_bulk_hotel_featured" value="1" style="width:16px;height:16px;accent-color:#fff;">
+                            ⭐ Mark as Featured
+                        </label>
+                        <label style="display:flex;align-items:center;gap:7px;font-size:13px;color:#fff;font-weight:600;cursor:pointer;">
+                            <input type="checkbox" id="fth_bulk_hotel_popular" value="1" style="width:16px;height:16px;accent-color:#fff;">
+                            🔥 Mark as Popular
+                        </label>
                     </div>
                     <div style="display:flex;align-items:center;gap:14px;flex-wrap:wrap;">
                         <button type="button" id="fth_bulk_import_hotel_btn" class="button" style="background: #fff; color: #115e59; border: none; padding: 12px 30px; font-size: 16px; font-weight: 700; border-radius: 6px; cursor: pointer;">⚡ Import Hotels Live</button>
@@ -1203,6 +1223,8 @@ class FTH_Admin {
                             city: $('#fth_bulk_city_term').val(),
                             country: $('#fth_bulk_country').val(),
                             category: $('#fth_bulk_category').val(),
+                            is_featured: $('#fth_bulk_featured').is(':checked') ? 1 : 0,
+                            is_bestseller: $('#fth_bulk_popular').is(':checked') ? 1 : 0,
                             nonce: '<?php echo wp_create_nonce('fth_import_publish'); ?>'
                         },
                         success: function(r) {
@@ -1358,6 +1380,8 @@ class FTH_Admin {
                                         type: 'hotel',
                                         city: $('#fth_bulk_hotel_city').val(),
                                         country: $('#fth_bulk_hotel_country').val(),
+                                        is_featured: $('#fth_bulk_hotel_featured').is(':checked') ? 1 : 0,
+                                        is_bestseller: $('#fth_bulk_hotel_popular').is(':checked') ? 1 : 0,
                                         nonce: '<?php echo wp_create_nonce('fth_import_publish'); ?>'
                                     },
                                     success: function(r) {

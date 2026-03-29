@@ -84,7 +84,15 @@ get_header();
     <div class="fth-hero-bg" style="background-image: url('<?php echo esc_url($hero_image); ?>');"></div>
     <div class="fth-hero-overlay"></div>
     <div class="fth-hero-content">
-        <?php if ($icon): ?><div class="fth-hero-icon"><i class="<?php echo esc_attr($icon); ?>"></i></div><?php endif; ?>
+        <?php
+        $display_icon = $icon ?: FTH_Templates::get_category_emoji($term);
+        if ($display_icon):
+            if (strpos($display_icon, 'fa') === 0): ?>
+            <div class="fth-hero-icon"><i class="<?php echo esc_attr($display_icon); ?>"></i></div>
+            <?php else: ?>
+            <div class="fth-hero-icon" style="font-size:42px;line-height:1;background:transparent;"><?php echo esc_html($display_icon); ?></div>
+            <?php endif;
+        endif; ?>
         <h1 class="fth-hero-title"><?php echo esc_html($term->name); ?></h1>
         <p class="fth-hero-subtitle"><?php echo esc_html($activity_count); ?> tours & activities</p>
         <form class="fth-search-box" action="<?php echo home_url('/things-to-do/'); ?>" method="get">
