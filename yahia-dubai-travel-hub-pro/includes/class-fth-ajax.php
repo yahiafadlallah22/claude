@@ -176,6 +176,95 @@ private static function build_affiliate_redirect($url) {
     return 'https://affiliate.klook.com/redirect?aid=' . rawurlencode($affiliate_id) . '&aff_adid=1238080&k_site=' . rawurlencode($url);
 }
 
+/**
+ * Fetch a Klook page HTML with multiple bypass strategies for Cloudflare.
+ *
+ * Tries (in order):
+ *  1. Direct cURL with Chrome 124 headers (cookie-persisted session)
+ *  2. Same URL without /en-US/ locale prefix
+ *  3. Google Web Cache — Googlebot is whitelisted by Cloudflare
+ *  4. Wayback Machine latest snapshot (archive.org)
+ *
+ * Returns the first response body that contains __NEXT_DATA__.
+ * If none have __NEXT_DATA__, returns whatever body was obtained (for og: tag parsing).
+ *
+ * @param  string $url   Klook URL (already normalised to /en-US/)
+ * @return array  { body: string, url: string, source: string }
+ */
+private static function fetch_klook_html($url) {
+    $result = array('body' => '', 'url' => $url, 'source' => 'none');
+    $best_body = ''; // best non-empty body even if no __NEXT_DATA__
+
+    // ── 1. Direct fetch ───────────────────────────────────────────────
+    $r = self::remote_get($url, array('timeout' => 60));
+    if (!is_wp_error($r)) {
+        $b = wp_remote_retrieve_body($r);
+        if (!empty($b)) {
+            if (strpos($b, '__NEXT_DATA__') !== false) {
+                return array('body' => $b, 'url' => $url, 'source' => 'direct');
+            }
+            $best_body = $b;
+        }
+    }
+
+    // ── 2. Without /en-US/ locale ────────────────────────────────────
+    if (strpos($url, '/en-US/') !== false) {
+        $url_nl = preg_replace('#/en-US/#', '/', $url);
+        $r2 = self::remote_get($url_nl, array('timeout' => 60));
+        if (!is_wp_error($r2)) {
+            $b2 = wp_remote_retrieve_body($r2);
+            if (!empty($b2)) {
+                if (strpos($b2, '__NEXT_DATA__') !== false) {
+                    return array('body' => $b2, 'url' => $url_nl, 'source' => 'direct_noloc');
+                }
+                if (empty($best_body)) $best_body = $b2;
+            }
+        }
+    }
+
+    // ── 3. Google Web Cache (Googlebot is CF-whitelisted) ────────────
+    $url_bare = preg_replace('#^https?://#', '', $url); // strip scheme
+    $gc_url   = 'https://webcache.googleusercontent.com/search?q=cache:' . rawurlencode($url_bare) . '&hl=en&gl=us';
+    $r3 = self::remote_get($gc_url, array(
+        'timeout' => 45,
+        'headers' => array('Referer' => 'https://www.google.com/'),
+    ));
+    if (!is_wp_error($r3)) {
+        $b3 = wp_remote_retrieve_body($r3);
+        $c3 = wp_remote_retrieve_response_code($r3);
+        if ($c3 === 200 && !empty($b3)) {
+            if (strpos($b3, '__NEXT_DATA__') !== false) {
+                return array('body' => $b3, 'url' => $url, 'source' => 'google_cache');
+            }
+            if (empty($best_body)) $best_body = $b3;
+        }
+    }
+
+    // ── 4. Wayback Machine latest snapshot ───────────────────────────
+    $wb_api = 'https://archive.org/wayback/available?url=' . rawurlencode($url_bare);
+    $r4 = self::remote_get($wb_api, array('timeout' => 20));
+    if (!is_wp_error($r4)) {
+        $wb_json = json_decode(wp_remote_retrieve_body($r4), true);
+        $snap    = isset($wb_json['archived_snapshots']['closest']['url']) ? $wb_json['archived_snapshots']['closest']['url'] : '';
+        if (!empty($snap)) {
+            $r5 = self::remote_get($snap, array('timeout' => 60));
+            if (!is_wp_error($r5)) {
+                $b5 = wp_remote_retrieve_body($r5);
+                if (!empty($b5)) {
+                    if (strpos($b5, '__NEXT_DATA__') !== false) {
+                        return array('body' => $b5, 'url' => $url, 'source' => 'wayback');
+                    }
+                    if (empty($best_body)) $best_body = $b5;
+                }
+            }
+        }
+    }
+
+    // Return best non-empty body (og: meta tags may still be present)
+    $result['body'] = $best_body;
+    return $result;
+}
+
 private static function array_find_first($data, $keys) {
     if (!is_array($data)) {
         return '';
@@ -901,17 +990,29 @@ public static function import_bulk_city() {
         $links = array();
         $notes = array();
         foreach (array_unique($expanded) as $candidate_url) {
-            $response = self::remote_get($candidate_url, array('timeout' => 60));
-            if (is_wp_error($response)) {
-                $notes[] = 'Could not fetch ' . $candidate_url . ': ' . $response->get_error_message();
-                continue;
+            $body = '';
+            $r = self::remote_get($candidate_url, array('timeout' => 60));
+            if (!is_wp_error($r)) {
+                $body = wp_remote_retrieve_body($r);
             }
-            $body = wp_remote_retrieve_body($response);
+            // If direct fetch was blocked (CF), try Google Cache for the listing page
+            if (empty($body) || (strpos($body, '__NEXT_DATA__') === false && strpos($body, '/activity/') === false)) {
+                $url_bare = preg_replace('#^https?://#', '', $candidate_url);
+                $gc_url   = 'https://webcache.googleusercontent.com/search?q=cache:' . rawurlencode($url_bare) . '&hl=en&gl=us';
+                $r_gc = self::remote_get($gc_url, array('timeout' => 45, 'headers' => array('Referer' => 'https://www.google.com/')));
+                if (!is_wp_error($r_gc)) {
+                    $gc_body = wp_remote_retrieve_body($r_gc);
+                    $gc_code = wp_remote_retrieve_response_code($r_gc);
+                    if ($gc_code === 200 && !empty($gc_body) && strpos($gc_body, '/activity/') !== false) {
+                        $body  = $gc_body;
+                        $notes[] = 'Used Google Cache for: ' . $candidate_url;
+                    }
+                }
+            }
             if (empty($body)) {
                 $notes[] = 'Empty response for ' . $candidate_url;
                 continue;
             }
-            // If Cloudflare blocked us, skip — no links to extract
             if (strpos($body, '__NEXT_DATA__') === false && strpos($body, '/activity/') === false) {
                 $notes[] = 'Blocked (no content) on ' . $candidate_url;
                 continue;
@@ -1058,29 +1159,13 @@ public static function import_bulk_city() {
             }
         }
 
-        // Fetch the real Klook page
-        $response = self::remote_get($url, array('timeout' => 60, 'redirection' => 5));
+        // Fetch with multi-strategy fallback: direct → no-locale → Google Cache → Wayback Machine
+        $fetch = self::fetch_klook_html($url);
+        $body  = $fetch['body'];
+        $url   = $fetch['url'];
 
-        if (is_wp_error($response)) {
-            return array('success' => false, 'message' => 'Failed to fetch URL: ' . $response->get_error_message());
-        }
-
-        $body = wp_remote_retrieve_body($response);
         if (empty($body)) {
-            return array('success' => false, 'message' => 'Empty response from Klook');
-        }
-
-        // If Cloudflare blocked us (no __NEXT_DATA__), retry without /en-US/ locale prefix
-        if (strpos($body, '__NEXT_DATA__') === false && strpos($url, '/en-US/') !== false) {
-            $url_no_locale = preg_replace('#/en-US/#', '/', $url);
-            $response2 = self::remote_get($url_no_locale, array('timeout' => 60, 'redirection' => 5));
-            if (!is_wp_error($response2)) {
-                $body2 = wp_remote_retrieve_body($response2);
-                if (!empty($body2) && strpos($body2, '__NEXT_DATA__') !== false) {
-                    $body = $body2;
-                    $url  = $url_no_locale;
-                }
-            }
+            return array('success' => false, 'message' => 'Failed to fetch activity page (all strategies failed): ' . $url);
         }
 
         // Parse data
@@ -1409,12 +1494,25 @@ public static function import_bulk_city() {
             $listing_map = array();
             $notes = array();
             foreach (array_unique($candidate_urls) as $candidate_url) {
-                $response = self::remote_get($candidate_url, array('timeout' => 60));
-                if (is_wp_error($response)) {
-                    $notes[] = 'Failed ' . $candidate_url . ': ' . $response->get_error_message();
-                    continue;
+                $body = '';
+                $r = self::remote_get($candidate_url, array('timeout' => 60));
+                if (!is_wp_error($r)) {
+                    $body = wp_remote_retrieve_body($r);
                 }
-                $body = wp_remote_retrieve_body($response);
+                // If CF blocked, try Google Cache for the listing page
+                if (empty($body) || (strpos($body, '__NEXT_DATA__') === false && strpos($body, '/hotels/') === false)) {
+                    $url_bare = preg_replace('#^https?://#', '', $candidate_url);
+                    $gc_url   = 'https://webcache.googleusercontent.com/search?q=cache:' . rawurlencode($url_bare) . '&hl=en&gl=us';
+                    $r_gc = self::remote_get($gc_url, array('timeout' => 45, 'headers' => array('Referer' => 'https://www.google.com/')));
+                    if (!is_wp_error($r_gc)) {
+                        $gc_body = wp_remote_retrieve_body($r_gc);
+                        $gc_code = wp_remote_retrieve_response_code($r_gc);
+                        if ($gc_code === 200 && !empty($gc_body) && strpos($gc_body, '/hotels/') !== false) {
+                            $body  = $gc_body;
+                            $notes[] = 'Used Google Cache for: ' . $candidate_url;
+                        }
+                    }
+                }
                 if (!$body) {
                     $notes[] = 'Empty response for ' . $candidate_url;
                     continue;
@@ -1455,13 +1553,11 @@ public static function import_bulk_city() {
      * Import hotel from Klook
      */
     private static function import_hotel($url, $params, $original_deeplink = '') {
-        $response = self::remote_get($url, array('timeout'=>45,'redirection'=>5));
-        if (is_wp_error($response)) {
-            return array('success'=>false,'message'=>'Failed to fetch hotel URL: ' . $response->get_error_message());
-        }
-        $body = wp_remote_retrieve_body($response);
-        if (!$body) {
-            return array('success'=>false,'message'=>'Empty response from hotel page');
+        // Fetch with multi-strategy fallback: direct → no-locale → Google Cache → Wayback Machine
+        $fetch = self::fetch_klook_html($url);
+        $body  = $fetch['body'];
+        if (empty($body)) {
+            return array('success'=>false,'message'=>'Failed to fetch hotel page (all strategies failed): ' . $url);
         }
         $data = self::parse_klook_hotel_html($body, $url);
         $fallback = (!empty($params['listing_fallback']) && is_array($params['listing_fallback'])) ? $params['listing_fallback'] : array();
