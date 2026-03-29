@@ -22,6 +22,7 @@ class FTH_Admin {
         add_action('admin_post_fth_regenerate_pages', array(__CLASS__, 'handle_regenerate_pages'));
         add_action('admin_post_fth_delete_generated_pages', array(__CLASS__, 'handle_delete_generated_pages'));
         add_action('admin_post_fth_delete_imported_media', array(__CLASS__, 'handle_delete_imported_media'));
+        add_action('wp_ajax_fth_delete_all_content', array(__CLASS__, 'handle_delete_all_content_ajax'));
     }
     
     /**
@@ -583,6 +584,61 @@ class FTH_Admin {
     }
 
 
+    /**
+     * AJAX: Delete all imported activities / hotels (and optionally their media)
+     */
+    public static function handle_delete_all_content_ajax() {
+        if (!current_user_can('manage_options') || !check_ajax_referer('fth_import_publish', 'nonce', false)) {
+            wp_send_json_error(array('message' => 'Unauthorized'));
+        }
+
+        $do_activities = !empty($_POST['activities']);
+        $do_hotels     = !empty($_POST['hotels']);
+        $do_media      = !empty($_POST['media']);
+
+        if (!$do_activities && !$do_hotels) {
+            wp_send_json_error(array('message' => 'Nothing selected.'));
+        }
+
+        $post_types = array();
+        if ($do_activities) $post_types[] = 'travel_activity';
+        if ($do_hotels)     $post_types[] = 'travel_hotel';
+
+        $posts = get_posts(array(
+            'post_type'      => $post_types,
+            'post_status'    => 'any',
+            'posts_per_page' => -1,
+            'fields'         => 'ids',
+        ));
+
+        $deleted = 0;
+        $media_deleted = 0;
+        foreach ((array) $posts as $post_id) {
+            if ($do_media) {
+                // Delete thumbnail
+                $thumb_id = (int) get_post_thumbnail_id($post_id);
+                if ($thumb_id) {
+                    wp_delete_attachment($thumb_id, true);
+                    $media_deleted++;
+                }
+                // Delete gallery attachments
+                $gallery_ids = array_filter(array_map('intval', explode(',', (string) get_post_meta($post_id, '_fth_gallery', true))));
+                $tracked_ids = array_filter(array_map('intval', explode(',', (string) get_post_meta($post_id, '_fth_imported_attachment_ids', true))));
+                foreach (array_unique(array_merge($gallery_ids, $tracked_ids)) as $aid) {
+                    if ($aid) { wp_delete_attachment($aid, true); $media_deleted++; }
+                }
+            }
+            wp_delete_post($post_id, true);
+            $deleted++;
+        }
+
+        $msg = 'Deleted ' . $deleted . ' post(s)';
+        if ($do_media) $msg .= ' and ' . $media_deleted . ' media file(s)';
+        $msg .= '.';
+
+        wp_send_json_success(array('message' => $msg, 'deleted' => $deleted, 'media_deleted' => $media_deleted));
+    }
+
     public static function handle_delete_imported_media() {
         if (!current_user_can('manage_options') || !check_admin_referer('fth_delete_imported_media')) {
             wp_die('Unauthorized');
@@ -773,10 +829,19 @@ class FTH_Admin {
             <input type="number" id="fth_bulk_limit" value="60" min="1" max="200" style="width: 100%; padding: 10px; border: none; border-radius: 6px;">
         </div>
     </div>
-    <button type="button" id="fth_bulk_import_btn" class="button" style="background: #fff; color: #2575fc; border: none; padding: 12px 30px; font-size: 16px; font-weight: 700; border-radius: 6px; cursor: pointer;">
-        ⚡ Fetch All Activities
-    </button>
-    <div id="fth_bulk_import_status" style="margin-top: 15px; padding: 12px; border-radius: 6px; display: none;"></div>
+    <div style="display:flex;align-items:center;gap:14px;flex-wrap:wrap;">
+        <button type="button" id="fth_bulk_import_btn" class="button" style="background: #fff; color: #2575fc; border: none; padding: 12px 30px; font-size: 16px; font-weight: 700; border-radius: 6px; cursor: pointer;">
+            ⚡ Import Activities Live
+        </button>
+        <button type="button" id="fth_bulk_import_stop" style="display:none;background:rgba(255,255,255,0.18);color:#fff;border:1px solid rgba(255,255,255,0.5);padding:10px 22px;font-size:14px;font-weight:600;border-radius:6px;cursor:pointer;">⏹ Stop</button>
+        <span id="fth_bulk_import_counter" style="font-size:13px;opacity:0.85;"></span>
+    </div>
+    <div id="fth_bulk_import_status" style="margin-top: 12px; padding: 10px 14px; border-radius: 6px; display: none;"></div>
+    <!-- Live preview log -->
+    <div id="fth_bulk_live_log" style="display:none;margin-top:16px;background:rgba(0,0,0,0.35);border-radius:10px;padding:14px;max-height:460px;overflow-y:auto;">
+        <div style="font-size:12px;opacity:0.65;margin-bottom:10px;letter-spacing:0.4px;">LIVE IMPORT LOG — activities</div>
+        <div id="fth_bulk_live_log_items"></div>
+    </div>
 </div>
 
 
@@ -854,8 +919,36 @@ class FTH_Admin {
                             <input type="number" id="fth_bulk_hotel_limit" value="12" min="1" max="120" style="width: 100%; padding: 10px; border: none; border-radius: 6px;">
                         </div>
                     </div>
-                    <button type="button" id="fth_bulk_import_hotel_btn" class="button" style="background: #fff; color: #115e59; border: none; padding: 12px 30px; font-size: 16px; font-weight: 700; border-radius: 6px; cursor: pointer;">⚡ Fetch All Hotels</button>
-                    <div id="fth_bulk_import_hotel_status" style="margin-top: 15px; padding: 12px; border-radius: 6px; display: none;"></div>
+                    <div style="display:flex;align-items:center;gap:14px;flex-wrap:wrap;">
+                        <button type="button" id="fth_bulk_import_hotel_btn" class="button" style="background: #fff; color: #115e59; border: none; padding: 12px 30px; font-size: 16px; font-weight: 700; border-radius: 6px; cursor: pointer;">⚡ Import Hotels Live</button>
+                        <button type="button" id="fth_bulk_hotel_stop" style="display:none;background:rgba(255,255,255,0.18);color:#fff;border:1px solid rgba(255,255,255,0.5);padding:10px 22px;font-size:14px;font-weight:600;border-radius:6px;cursor:pointer;">⏹ Stop</button>
+                        <span id="fth_bulk_hotel_counter" style="font-size:13px;opacity:0.85;"></span>
+                    </div>
+                    <div id="fth_bulk_import_hotel_status" style="margin-top: 12px; padding: 10px 14px; border-radius: 6px; display: none;"></div>
+                    <!-- Live preview log -->
+                    <div id="fth_bulk_hotel_live_log" style="display:none;margin-top:16px;background:rgba(0,0,0,0.35);border-radius:10px;padding:14px;max-height:460px;overflow-y:auto;">
+                        <div style="font-size:12px;opacity:0.65;margin-bottom:10px;letter-spacing:0.4px;">LIVE IMPORT LOG — hotels</div>
+                        <div id="fth_bulk_hotel_live_log_items"></div>
+                    </div>
+                </div>
+
+                <!-- Delete All Content -->
+                <div class="fth-import-panel" style="background: linear-gradient(135deg, #7f1d1d 0%, #991b1b 100%); color: #fff; padding: 30px; border-radius: 12px; margin-bottom: 30px;">
+                    <h2 style="margin: 0 0 10px; font-size: 24px;">🗑️ Delete all imported content</h2>
+                    <p style="margin: 0 0 20px; opacity: 0.9;">Permanently remove all imported activities and/or hotels (and their media). This cannot be undone. Hub pages and taxonomy terms (cities, countries, categories) are <strong>not</strong> deleted.</p>
+                    <div style="display:flex;gap:14px;flex-wrap:wrap;margin-bottom:16px;">
+                        <label style="display:flex;align-items:center;gap:8px;cursor:pointer;">
+                            <input type="checkbox" id="fth_delete_activities" value="1" checked> Delete all activities
+                        </label>
+                        <label style="display:flex;align-items:center;gap:8px;cursor:pointer;">
+                            <input type="checkbox" id="fth_delete_hotels" value="1" checked> Delete all hotels
+                        </label>
+                        <label style="display:flex;align-items:center;gap:8px;cursor:pointer;">
+                            <input type="checkbox" id="fth_delete_media" value="1"> Also delete imported images
+                        </label>
+                    </div>
+                    <button type="button" id="fth_delete_all_btn" class="button" style="background:#fff;color:#7f1d1d;border:none;padding:12px 30px;font-size:16px;font-weight:700;border-radius:6px;cursor:pointer;">🗑️ Delete Selected Content</button>
+                    <div id="fth_delete_all_status" style="margin-top:14px;padding:10px 14px;border-radius:6px;display:none;"></div>
                 </div>
 
                 <!-- Batch URL import -->
@@ -1010,50 +1103,141 @@ class FTH_Admin {
             });
             
 
-// Bulk Import
-$('#fth_bulk_import_btn').on('click', function() {
-    var url = $('#fth_bulk_city_url').val().trim();
-    var $btn = $(this);
-    var $status = $('#fth_bulk_import_status');
+// ── Live Bulk Import — Activities ────────────────────────────────────────────
+(function() {
+    var fthActStop = false;
 
-    if (!url || !url.includes('klook.com')) {
-        $status.css('background', 'rgba(244,67,54,0.3)').text('Please enter a valid Klook destination URL').show();
-        return;
+    function fthActivityLogItem(item, index, total) {
+        var discount = item.discount ? '<span style="background:#f59e0b;color:#000;font-size:10px;font-weight:700;padding:1px 5px;border-radius:4px;margin-left:6px;">-' + item.discount + '</span>' : '';
+        var price    = item.price    ? '<span style="font-size:13px;opacity:0.8;margin-left:6px;">' + (item.currency || '') + item.price + '</span>' : '';
+        var thumb    = item.thumb    ? '<img src="' + item.thumb + '" style="width:64px;height:48px;object-fit:cover;border-radius:5px;flex-shrink:0;" loading="lazy">' : '<div style="width:64px;height:48px;background:rgba(255,255,255,0.12);border-radius:5px;flex-shrink:0;display:flex;align-items:center;justify-content:center;font-size:20px;">🏖️</div>';
+        return '<div style="display:flex;align-items:center;gap:10px;padding:8px 0;border-bottom:1px solid rgba(255,255,255,0.08);">'
+            + thumb
+            + '<div style="flex:1;min-width:0;">'
+            +   '<div style="font-size:13px;font-weight:600;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;">' + $('<span>').text(item.title).html() + discount + price + '</div>'
+            +   '<div style="font-size:11px;opacity:0.6;margin-top:2px;">#' + index + ' of ' + total + '</div>'
+            + '</div>'
+            + '<div style="display:flex;gap:6px;flex-shrink:0;">'
+            +   '<a href="' + item.edit_url + '" style="font-size:11px;color:#93c5fd;text-decoration:none;">Edit</a>'
+            +   '<a href="' + item.view_url + '" target="_blank" style="font-size:11px;color:#6ee7b7;text-decoration:none;">View</a>'
+            + '</div>'
+            + '</div>';
     }
 
-    $btn.prop('disabled', true).text('Fetching...');
-    $status.css('background', 'rgba(255,255,255,0.2)').text('Fetching activity links and importing...').show();
+    $('#fth_bulk_import_btn').on('click', function() {
+        var url = $('#fth_bulk_city_url').val().trim();
+        var $btn = $(this);
+        var $stop = $('#fth_bulk_import_stop');
+        var $status = $('#fth_bulk_import_status');
+        var $counter = $('#fth_bulk_import_counter');
+        var $log = $('#fth_bulk_live_log');
+        var $logItems = $('#fth_bulk_live_log_items');
 
-    $.ajax({
-        url: ajaxurl,
-        type: 'POST',
-        data: {
-            action: 'fth_import_bulk_city',
-            url: url,
-            city: $('#fth_bulk_city_term').val(),
-            country: $('#fth_bulk_country').val(),
-            category: $('#fth_bulk_category').val(),
-            limit: $('#fth_bulk_limit').val(),
-            nonce: '<?php echo wp_create_nonce('fth_import_publish'); ?>'
-        },
-        success: function(response) {
-            if (response.success) {
-                $status.css('background', 'rgba(76,175,80,0.3)').text('✅ ' + response.data.message).show();
-            } else {
-                $status.css('background', 'rgba(244,67,54,0.3)').text('❌ ' + (response.data ? response.data.message : 'Bulk import failed')).show();
-            }
-        },
-        error: function(xhr) {
-            var msg = 'Network error';
-            if (xhr && xhr.responseJSON && xhr.responseJSON.data && xhr.responseJSON.data.message) { msg = xhr.responseJSON.data.message; }
-            else if (xhr && xhr.responseText) { msg = xhr.responseText.substring(0, 240); }
-            $status.css('background', 'rgba(244,67,54,0.3)').text('❌ ' + msg).show();
-        },
-        complete: function() {
-            $btn.prop('disabled', false).text('⚡ Fetch All Activities');
+        if (!url || url.indexOf('klook.com') === -1) {
+            $status.css('background','rgba(244,67,54,0.3)').text('Please enter a valid Klook destination URL').show();
+            return;
         }
+
+        fthActStop = false;
+        $btn.prop('disabled', true).text('Discovering URLs...');
+        $stop.show();
+        $status.css('background','rgba(255,255,255,0.2)').text('Step 1/2 — Discovering activity URLs...').show();
+        $counter.text('');
+        $log.show();
+        $logItems.html('<div style="opacity:0.55;font-size:12px;">Scanning Klook pages...</div>');
+
+        $.ajax({
+            url: ajaxurl,
+            type: 'POST',
+            timeout: 180000,
+            data: {
+                action: 'fth_discover_import_urls',
+                url: url,
+                type: 'activity',
+                city: $('#fth_bulk_city_term').val(),
+                country: $('#fth_bulk_country').val(),
+                category: $('#fth_bulk_category').val(),
+                limit: $('#fth_bulk_limit').val(),
+                nonce: '<?php echo wp_create_nonce('fth_import_publish'); ?>'
+            },
+            success: function(res) {
+                if (!res.success || !res.data.urls || !res.data.urls.length) {
+                    var msg = (res.data && res.data.message) ? res.data.message : 'No URLs found';
+                    $status.css('background','rgba(244,67,54,0.3)').text('❌ ' + msg).show();
+                    $btn.prop('disabled', false).text('⚡ Import Activities Live');
+                    $stop.hide(); return;
+                }
+                var urls = res.data.urls;
+                var skipped = res.data.skipped || 0;
+                var total = urls.length;
+                $status.css('background','rgba(255,255,255,0.2)').text('Step 2/2 — Importing ' + total + ' activities' + (skipped ? ' (' + skipped + ' already imported skipped)' : '') + '...').show();
+                $logItems.empty();
+                $btn.text('Importing 0 / ' + total + '...');
+
+                var idx = 0;
+                var imported = 0;
+                var errors = 0;
+
+                function importNext() {
+                    if (fthActStop || idx >= urls.length) {
+                        var summary = '✅ Done: ' + imported + ' imported, ' + errors + ' errors' + (skipped ? ', ' + skipped + ' skipped' : '');
+                        $status.css('background', imported > 0 ? 'rgba(76,175,80,0.3)' : 'rgba(255,165,0,0.3)').text(summary).show();
+                        $counter.text(imported + ' / ' + total + ' done');
+                        $btn.prop('disabled', false).text('⚡ Import Activities Live');
+                        $stop.hide(); return;
+                    }
+                    var currentUrl = urls[idx];
+                    var currentIdx = idx + 1;
+                    idx++;
+                    $btn.text('Importing ' + (currentIdx) + ' / ' + total + '...');
+                    $counter.text((currentIdx - 1) + ' / ' + total + ' done');
+
+                    $.ajax({
+                        url: ajaxurl,
+                        type: 'POST',
+                        timeout: 120000,
+                        data: {
+                            action: 'fth_import_single_live',
+                            url: currentUrl,
+                            type: 'activity',
+                            city: $('#fth_bulk_city_term').val(),
+                            country: $('#fth_bulk_country').val(),
+                            category: $('#fth_bulk_category').val(),
+                            nonce: '<?php echo wp_create_nonce('fth_import_publish'); ?>'
+                        },
+                        success: function(r) {
+                            if (r.success && r.data) {
+                                imported++;
+                                $logItems.prepend(fthActivityLogItem(r.data, currentIdx, total));
+                                $log[0].scrollTop = 0;
+                            } else {
+                                errors++;
+                                var errMsg = (r.data && r.data.message) ? r.data.message : 'failed';
+                                $logItems.prepend('<div style="padding:5px 0;font-size:11px;opacity:0.55;border-bottom:1px solid rgba(255,255,255,0.06);">❌ #' + currentIdx + ': ' + $('<span>').text(errMsg).html() + '</div>');
+                            }
+                        },
+                        error: function() {
+                            errors++;
+                            $logItems.prepend('<div style="padding:5px 0;font-size:11px;opacity:0.55;border-bottom:1px solid rgba(255,255,255,0.06);">❌ #' + currentIdx + ': network error</div>');
+                        },
+                        complete: function() { importNext(); }
+                    });
+                }
+                importNext();
+            },
+            error: function(xhr) {
+                var msg = 'Network error';
+                if (xhr && xhr.responseJSON && xhr.responseJSON.data && xhr.responseJSON.data.message) msg = xhr.responseJSON.data.message;
+                else if (xhr && xhr.responseText) msg = xhr.responseText.substring(0, 240);
+                $status.css('background','rgba(244,67,54,0.3)').text('❌ ' + msg).show();
+                $btn.prop('disabled', false).text('⚡ Import Activities Live');
+                $stop.hide();
+            }
+        });
     });
-});
+
+    $('#fth_bulk_import_stop').on('click', function() { fthActStop = true; $(this).hide(); });
+})();
 
             // Import Hotel
             $('#fth_import_hotel_btn').on('click', function() {
@@ -1076,25 +1260,139 @@ $('#fth_bulk_import_btn').on('click', function() {
                 }).fail(function(xhr){ var msg = 'Network error'; if (xhr && xhr.responseJSON && xhr.responseJSON.data && xhr.responseJSON.data.message) { msg = xhr.responseJSON.data.message; } else if (xhr && xhr.responseText) { msg = xhr.responseText.substring(0,240); } $status.css('background','rgba(244,67,54,0.3)').text('❌ ' + msg).show(); }).always(function(){ $btn.prop('disabled', false).text('⚡ Import Hotel & Publish'); });
             });
 
-            // Bulk Import Hotels
-            $('#fth_bulk_import_hotel_btn').on('click', function() {
-                var url = $('#fth_bulk_hotel_url').val().trim();
-                var $btn = $(this);
-                var $status = $('#fth_bulk_import_hotel_status');
-                if (!url || !url.includes('klook.com')) {
-                    $status.css('background','rgba(244,67,54,0.3)').text('Please enter a valid Klook hotels URL').show();
-                    return;
+            // ── Live Bulk Import — Hotels ─────────────────────────────────────────────
+            (function() {
+                var fthHotelStop = false;
+
+                function fthHotelLogItem(item, index, total) {
+                    var discount = item.discount ? '<span style="background:#f59e0b;color:#000;font-size:10px;font-weight:700;padding:1px 5px;border-radius:4px;margin-left:6px;">-' + item.discount + '</span>' : '';
+                    var price    = item.price    ? '<span style="font-size:13px;opacity:0.8;margin-left:6px;">' + (item.currency || '') + item.price + '</span>' : '';
+                    var thumb    = item.thumb    ? '<img src="' + item.thumb + '" style="width:64px;height:48px;object-fit:cover;border-radius:5px;flex-shrink:0;" loading="lazy">' : '<div style="width:64px;height:48px;background:rgba(255,255,255,0.12);border-radius:5px;flex-shrink:0;display:flex;align-items:center;justify-content:center;font-size:20px;">🏨</div>';
+                    return '<div style="display:flex;align-items:center;gap:10px;padding:8px 0;border-bottom:1px solid rgba(255,255,255,0.08);">'
+                        + thumb
+                        + '<div style="flex:1;min-width:0;">'
+                        +   '<div style="font-size:13px;font-weight:600;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;">' + $('<span>').text(item.title).html() + discount + price + '</div>'
+                        +   '<div style="font-size:11px;opacity:0.6;margin-top:2px;">#' + index + ' of ' + total + '</div>'
+                        + '</div>'
+                        + '<div style="display:flex;gap:6px;flex-shrink:0;">'
+                        +   '<a href="' + item.edit_url + '" style="font-size:11px;color:#93c5fd;text-decoration:none;">Edit</a>'
+                        +   '<a href="' + item.view_url + '" target="_blank" style="font-size:11px;color:#6ee7b7;text-decoration:none;">View</a>'
+                        + '</div>'
+                        + '</div>';
                 }
-                $btn.prop('disabled', true).text('Fetching...');
-                $status.css('background','rgba(255,255,255,0.2)').text('Fetching hotel links and importing...').show();
-                $.post(ajaxurl, {action:'fth_import_bulk_hotels', url:url, city:$('#fth_bulk_hotel_city').val(), country:$('#fth_bulk_hotel_country').val(), limit:$('#fth_bulk_hotel_limit').val(), nonce:'<?php echo wp_create_nonce('fth_import_publish'); ?>'}, function(response){
-                    if (response.success) {
-                        $status.css('background','rgba(76,175,80,0.3)').text('✅ ' + response.data.message).show();
-                    } else {
-                        $status.css('background','rgba(244,67,54,0.3)').text('❌ ' + (response.data ? response.data.message : 'Bulk import failed')).show();
+
+                $('#fth_bulk_import_hotel_btn').on('click', function() {
+                    var url = $('#fth_bulk_hotel_url').val().trim();
+                    var $btn = $(this);
+                    var $stop = $('#fth_bulk_hotel_stop');
+                    var $status = $('#fth_bulk_import_hotel_status');
+                    var $counter = $('#fth_bulk_hotel_counter');
+                    var $log = $('#fth_bulk_hotel_live_log');
+                    var $logItems = $('#fth_bulk_hotel_live_log_items');
+
+                    if (!url || url.indexOf('klook.com') === -1) {
+                        $status.css('background','rgba(244,67,54,0.3)').text('Please enter a valid Klook hotels URL').show();
+                        return;
                     }
-                }).fail(function(xhr){ var msg = 'Network error'; if (xhr && xhr.responseJSON && xhr.responseJSON.data && xhr.responseJSON.data.message) { msg = xhr.responseJSON.data.message; } else if (xhr && xhr.responseText) { msg = xhr.responseText.substring(0,240); } $status.css('background','rgba(244,67,54,0.3)').text('❌ ' + msg).show(); }).always(function(){ $btn.prop('disabled', false).text('⚡ Fetch All Hotels'); });
-            });
+
+                    fthHotelStop = false;
+                    $btn.prop('disabled', true).text('Discovering URLs...');
+                    $stop.show();
+                    $status.css('background','rgba(255,255,255,0.2)').text('Step 1/2 — Discovering hotel URLs...').show();
+                    $counter.text('');
+                    $log.show();
+                    $logItems.html('<div style="opacity:0.55;font-size:12px;">Scanning Klook pages...</div>');
+
+                    $.ajax({
+                        url: ajaxurl,
+                        type: 'POST',
+                        timeout: 180000,
+                        data: {
+                            action: 'fth_discover_import_urls',
+                            url: url,
+                            type: 'hotel',
+                            city: $('#fth_bulk_hotel_city').val(),
+                            country: $('#fth_bulk_hotel_country').val(),
+                            limit: $('#fth_bulk_hotel_limit').val(),
+                            nonce: '<?php echo wp_create_nonce('fth_import_publish'); ?>'
+                        },
+                        success: function(res) {
+                            if (!res.success || !res.data.urls || !res.data.urls.length) {
+                                var msg = (res.data && res.data.message) ? res.data.message : 'No URLs found';
+                                $status.css('background','rgba(244,67,54,0.3)').text('❌ ' + msg).show();
+                                $btn.prop('disabled', false).text('⚡ Import Hotels Live');
+                                $stop.hide(); return;
+                            }
+                            var urls = res.data.urls;
+                            var skipped = res.data.skipped || 0;
+                            var total = urls.length;
+                            $status.css('background','rgba(255,255,255,0.2)').text('Step 2/2 — Importing ' + total + ' hotels' + (skipped ? ' (' + skipped + ' already imported skipped)' : '') + '...').show();
+                            $logItems.empty();
+                            $btn.text('Importing 0 / ' + total + '...');
+
+                            var idx = 0;
+                            var imported = 0;
+                            var errors = 0;
+
+                            function importNext() {
+                                if (fthHotelStop || idx >= urls.length) {
+                                    var summary = '✅ Done: ' + imported + ' imported, ' + errors + ' errors' + (skipped ? ', ' + skipped + ' skipped' : '');
+                                    $status.css('background', imported > 0 ? 'rgba(76,175,80,0.3)' : 'rgba(255,165,0,0.3)').text(summary).show();
+                                    $counter.text(imported + ' / ' + total + ' done');
+                                    $btn.prop('disabled', false).text('⚡ Import Hotels Live');
+                                    $stop.hide(); return;
+                                }
+                                var currentUrl = urls[idx];
+                                var currentIdx = idx + 1;
+                                idx++;
+                                $btn.text('Importing ' + currentIdx + ' / ' + total + '...');
+                                $counter.text((currentIdx - 1) + ' / ' + total + ' done');
+
+                                $.ajax({
+                                    url: ajaxurl,
+                                    type: 'POST',
+                                    timeout: 120000,
+                                    data: {
+                                        action: 'fth_import_single_live',
+                                        url: currentUrl,
+                                        type: 'hotel',
+                                        city: $('#fth_bulk_hotel_city').val(),
+                                        country: $('#fth_bulk_hotel_country').val(),
+                                        nonce: '<?php echo wp_create_nonce('fth_import_publish'); ?>'
+                                    },
+                                    success: function(r) {
+                                        if (r.success && r.data) {
+                                            imported++;
+                                            $logItems.prepend(fthHotelLogItem(r.data, currentIdx, total));
+                                            $log[0].scrollTop = 0;
+                                        } else {
+                                            errors++;
+                                            var errMsg = (r.data && r.data.message) ? r.data.message : 'failed';
+                                            $logItems.prepend('<div style="padding:5px 0;font-size:11px;opacity:0.55;border-bottom:1px solid rgba(255,255,255,0.06);">❌ #' + currentIdx + ': ' + $('<span>').text(errMsg).html() + '</div>');
+                                        }
+                                    },
+                                    error: function() {
+                                        errors++;
+                                        $logItems.prepend('<div style="padding:5px 0;font-size:11px;opacity:0.55;border-bottom:1px solid rgba(255,255,255,0.06);">❌ #' + currentIdx + ': network error</div>');
+                                    },
+                                    complete: function() { importNext(); }
+                                });
+                            }
+                            importNext();
+                        },
+                        error: function(xhr) {
+                            var msg = 'Network error';
+                            if (xhr && xhr.responseJSON && xhr.responseJSON.data && xhr.responseJSON.data.message) msg = xhr.responseJSON.data.message;
+                            else if (xhr && xhr.responseText) msg = xhr.responseText.substring(0, 240);
+                            $status.css('background','rgba(244,67,54,0.3)').text('❌ ' + msg).show();
+                            $btn.prop('disabled', false).text('⚡ Import Hotels Live');
+                            $stop.hide();
+                        }
+                    });
+                });
+
+                $('#fth_bulk_hotel_stop').on('click', function() { fthHotelStop = true; $(this).hide(); });
+            })();
 
             // Country-wide import
             $('#fth_country_import_btn').on('click', function() {
@@ -1214,6 +1512,55 @@ $('#fth_bulk_import_btn').on('click', function() {
                 }).always(function() {
                     $btn.prop('disabled', false).text('⚡ Import All Listed URLs');
                 });
+            });
+        });
+
+        // ── Delete All Content ────────────────────────────────────────────────────
+        $('#fth_delete_all_btn').on('click', function() {
+            var doActivities = $('#fth_delete_activities').is(':checked');
+            var doHotels     = $('#fth_delete_hotels').is(':checked');
+            var doMedia      = $('#fth_delete_media').is(':checked');
+            var $btn    = $(this);
+            var $status = $('#fth_delete_all_status');
+
+            if (!doActivities && !doHotels) {
+                $status.css('background','rgba(244,67,54,0.3)').text('Select at least one content type to delete.').show();
+                return;
+            }
+            var types = [];
+            if (doActivities) types.push('activities');
+            if (doHotels)     types.push('hotels');
+            var label = types.join(' and ');
+            if (!confirm('⚠️ This will permanently delete all ' + label + (doMedia ? ' and their images' : '') + '. This cannot be undone.\n\nAre you sure?')) return;
+
+            $btn.prop('disabled', true).text('Deleting...');
+            $status.css('background','rgba(255,255,255,0.2)').text('Deleting content... please wait.').show();
+
+            $.ajax({
+                url: ajaxurl,
+                type: 'POST',
+                timeout: 300000,
+                data: {
+                    action:      'fth_delete_all_content',
+                    activities:  doActivities ? 1 : 0,
+                    hotels:      doHotels     ? 1 : 0,
+                    media:       doMedia      ? 1 : 0,
+                    nonce: '<?php echo wp_create_nonce('fth_import_publish'); ?>'
+                },
+                success: function(res) {
+                    if (res.success) {
+                        $status.css('background','rgba(76,175,80,0.3)').text('✅ ' + res.data.message).show();
+                    } else {
+                        $status.css('background','rgba(244,67,54,0.3)').text('❌ ' + (res.data ? res.data.message : 'Delete failed')).show();
+                    }
+                },
+                error: function(xhr) {
+                    var msg = 'Network error';
+                    if (xhr && xhr.responseJSON && xhr.responseJSON.data && xhr.responseJSON.data.message) msg = xhr.responseJSON.data.message;
+                    else if (xhr && xhr.responseText) msg = xhr.responseText.substring(0, 240);
+                    $status.css('background','rgba(244,67,54,0.3)').text('❌ ' + msg).show();
+                },
+                complete: function() { $btn.prop('disabled', false).text('🗑️ Delete Selected Content'); }
             });
         });
         </script>
