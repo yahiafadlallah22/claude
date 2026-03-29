@@ -479,26 +479,57 @@ private static function is_valid_content_image_url($url) {
     if (!preg_match('#^https?://#i', $url)) {
         return false;
     }
-    $blocked = array('logo', 'icon', 'avatar', 'sprite', 'placeholder', 'favicon', 'apple-touch-icon', 'app-store', 'google-play');
+    // Always-blocked keywords in URL path
+    $blocked = array(
+        'logo', '/icon', 'avatar', 'sprite', 'placeholder', 'favicon',
+        'apple-touch-icon', 'app-store', 'google-play', '/badge', '/tag/',
+        '/label/', 'category-icon', '/flag/', 'star-rating', 'review-badge',
+        '/ui/', '/button/', 'payment-', 'visa-', 'mastercard-',
+    );
     foreach ($blocked as $word) {
         if (stripos($url, $word) !== false) {
             return false;
         }
     }
-    // Always accept Klook CDN URLs — their image URLs often lack a file extension
+    // Klook CDN — extra filtering for small/icon transformations
     if (stripos($url, 'res.klook.com') !== false) {
+        // Reject if explicit width or height < 300 (thumbnail/icon)
+        if (preg_match('#[,/](?:w|h)_(\d+)#', $url, $dim_m)) {
+            if ((int) $dim_m[1] < 300) {
+                return false;
+            }
+        }
+        // Reject icon/thumb crop modes embedded in Cloudinary transformation string
+        if (preg_match('#[,/]c_(?:thumb|icon|pad_thumb|lpad)[,/]#', $url)) {
+            return false;
+        }
+        // Accept all other Klook CDN images (full-size activity/hotel photos)
         return true;
     }
     return (bool) preg_match('/\.(jpe?g|png|webp)(\?.*)?$/i', $url);
 }
 
 private static function clean_image_urls($urls, $limit = 5) {
-    $clean = array();
+    // Sort: prefer full-size res.klook.com images first, then other valid images
+    $priority = array();
+    $rest     = array();
     foreach ((array) $urls as $url) {
         $url = esc_url_raw(html_entity_decode((string) $url, ENT_QUOTES, 'UTF-8'));
         if (!$url || !self::is_valid_content_image_url($url)) {
             continue;
         }
+        // Prefer Klook CDN images that look like full-size content photos
+        if (stripos($url, 'res.klook.com') !== false &&
+            (strpos($url, '/activities/') !== false || strpos($url, '/htl-img/') !== false ||
+             strpos($url, '/activity-img/') !== false || strpos($url, '/upload/') !== false)) {
+            $priority[] = $url;
+        } else {
+            $rest[] = $url;
+        }
+    }
+    $all   = array_merge($priority, $rest);
+    $clean = array();
+    foreach ($all as $url) {
         if (!in_array($url, $clean, true)) {
             $clean[] = $url;
         }
