@@ -304,7 +304,7 @@ body.single-travel_hotel .widget-area,body.single-travel_hotel .sidebar,body.sin
           <div style="font-size:13px;color:#92400e;font-weight:700;">🤝 <?php echo esc_html($promo_text); ?></div>
         </div>
         <div class="klh-trust">
-          <div class="klh-trust-item"><span>🏨</span><span>Rooms, location and amenities in one clear page</span></div>
+          <div class="klh-trust-item"><span>🏨</span><span>Rooms, location and amenities – all in one place</span></div>
           <div class="klh-trust-item"><span>📍</span><span>Practical information for quick hotel comparison</span></div>
           <div class="klh-trust-item"><span>🔒</span><span>Secure booking via Klook</span></div>
           <div class="klh-trust-item"><span>⚡</span><span>Immediate availability confirmation</span></div>

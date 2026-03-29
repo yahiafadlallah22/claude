@@ -253,31 +253,9 @@ private static function fetch_klook_html($url) {
     $result    = array('body' => '', 'url' => $url, 'source' => 'none');
     $best_body = '';
 
-    // ── 1. Direct cURL with Chrome 124 headers ────────────────────────
-    $r = self::remote_get($url, array('timeout' => 45));
-    if (!is_wp_error($r)) {
-        $b = wp_remote_retrieve_body($r);
-        if (!empty($b) && strpos($b, '__NEXT_DATA__') !== false) {
-            return array('body' => $b, 'url' => $url, 'source' => 'direct');
-        }
-        if (!empty($b)) $best_body = $b;
-    }
-
-    // ── 2. Without /en-US/ locale ────────────────────────────────────
-    if (strpos($url, '/en-US/') !== false) {
-        $url_nl = preg_replace('#/en-US/#', '/', $url);
-        $r2 = self::remote_get($url_nl, array('timeout' => 45));
-        if (!is_wp_error($r2)) {
-            $b2 = wp_remote_retrieve_body($r2);
-            if (!empty($b2) && strpos($b2, '__NEXT_DATA__') !== false) {
-                return array('body' => $b2, 'url' => $url_nl, 'source' => 'direct_noloc');
-            }
-        }
-    }
-
-    // ── 3. ScraperAPI with JavaScript rendering (headless Chrome) ────
-    // ScraperAPI handles Cloudflare bypass with rotating proxies.
-    // render=true uses a real headless Chrome → guaranteed __NEXT_DATA__ for Next.js pages.
+    // ── 1. ScraperAPI render=true (FIRST — guaranteed Cloudflare bypass) ─
+    // Klook uses Cloudflare Bot Management which blocks all non-browser cURL.
+    // ScraperAPI with render=true uses real headless Chrome → always gets __NEXT_DATA__.
     $sa_key = self::get_scraperapi_key();
     if (!empty($sa_key)) {
         $sa_url = 'https://api.scraperapi.com?' . http_build_query(array(
@@ -285,6 +263,7 @@ private static function fetch_klook_html($url) {
             'url'          => $url,
             'render'       => 'true',
             'country_code' => 'us',
+            'keep_headers' => 'true',
         ));
         $sa_r = self::remote_get($sa_url, array('timeout' => 120));
         if (!is_wp_error($sa_r)) {
@@ -292,22 +271,42 @@ private static function fetch_klook_html($url) {
             if (!empty($sa_b) && strpos($sa_b, '__NEXT_DATA__') !== false) {
                 return array('body' => $sa_b, 'url' => $url, 'source' => 'scraperapi');
             }
-            if (!empty($sa_b) && empty($best_body)) $best_body = $sa_b;
+            if (!empty($sa_b)) $best_body = $sa_b;
         }
-        // Also try without render (faster, uses less credits)
-        if (!isset($sa_b) || empty($sa_b)) {
-            $sa_url2 = 'https://api.scraperapi.com?' . http_build_query(array(
-                'api_key'      => $sa_key,
-                'url'          => $url,
-                'country_code' => 'us',
-            ));
-            $sa_r2 = self::remote_get($sa_url2, array('timeout' => 60));
-            if (!is_wp_error($sa_r2)) {
-                $sa_b2 = wp_remote_retrieve_body($sa_r2);
-                if (!empty($sa_b2) && strpos($sa_b2, '__NEXT_DATA__') !== false) {
-                    return array('body' => $sa_b2, 'url' => $url, 'source' => 'scraperapi_fast');
-                }
-                if (!empty($sa_b2) && empty($best_body)) $best_body = $sa_b2;
+        // Also try without render (faster, fewer credits, works when Cloudflare is lighter)
+        $sa_url2 = 'https://api.scraperapi.com?' . http_build_query(array(
+            'api_key'      => $sa_key,
+            'url'          => $url,
+            'country_code' => 'us',
+        ));
+        $sa_r2 = self::remote_get($sa_url2, array('timeout' => 60));
+        if (!is_wp_error($sa_r2)) {
+            $sa_b2 = wp_remote_retrieve_body($sa_r2);
+            if (!empty($sa_b2) && strpos($sa_b2, '__NEXT_DATA__') !== false) {
+                return array('body' => $sa_b2, 'url' => $url, 'source' => 'scraperapi_fast');
+            }
+            if (!empty($sa_b2) && empty($best_body)) $best_body = $sa_b2;
+        }
+    }
+
+    // ── 2. Direct cURL with Chrome 124 headers (fast but Cloudflare-blocked) ─
+    $r = self::remote_get($url, array('timeout' => 30));
+    if (!is_wp_error($r)) {
+        $b = wp_remote_retrieve_body($r);
+        if (!empty($b) && strpos($b, '__NEXT_DATA__') !== false) {
+            return array('body' => $b, 'url' => $url, 'source' => 'direct');
+        }
+        if (!empty($b) && empty($best_body)) $best_body = $b;
+    }
+
+    // ── 3. Without /en-US/ locale ────────────────────────────────────
+    if (strpos($url, '/en-US/') !== false) {
+        $url_nl = preg_replace('#/en-US/#', '/', $url);
+        $r2 = self::remote_get($url_nl, array('timeout' => 25));
+        if (!is_wp_error($r2)) {
+            $b2 = wp_remote_retrieve_body($r2);
+            if (!empty($b2) && strpos($b2, '__NEXT_DATA__') !== false) {
+                return array('body' => $b2, 'url' => $url_nl, 'source' => 'direct_noloc');
             }
         }
     }
@@ -464,6 +463,11 @@ private static function array_collect_values($data, $keys, &$results = array()) 
     if (!is_array($data)) {
         return $results;
     }
+    // All known Klook sub-keys that hold the actual URL inside an image object
+    static $url_sub_keys = array(
+        'url','src','imgUrl','imageUrl','coverImageUrl','originalUrl','large','medium',
+        'original','imgSrc','thumbnailUrl','thumbnail','cover','href',
+    );
     foreach ($data as $key => $value) {
         if (in_array($key, $keys, true)) {
             if (is_string($value) && $value !== '') {
@@ -473,7 +477,7 @@ private static function array_collect_values($data, $keys, &$results = array()) 
                     if (is_string($sub) && $sub !== '') {
                         $results[] = $sub;
                     } elseif (is_array($sub)) {
-                        $maybe = self::array_find_first($sub, array('url', 'src', 'imageUrl', 'coverImageUrl', 'originalUrl'));
+                        $maybe = self::array_find_first($sub, $url_sub_keys);
                         if (is_string($maybe) && $maybe !== '') {
                             $results[] = $maybe;
                         }
@@ -3055,8 +3059,21 @@ public static function import_bulk_city() {
         
 
 // METHOD 0: Try __NEXT_DATA__ first (best source on modern Klook pages)
-if (preg_match('/<script[^>]*id=["\']__NEXT_DATA__["\'][^>]*>(.*?)<\/script>/si', $html, $next_match)) {
-    $next_json = json_decode(html_entity_decode(trim($next_match[1]), ENT_QUOTES, 'UTF-8'), true);
+// Use strpos/substr instead of regex to avoid pcre.backtrack_limit on large JSON blobs
+$next_data_raw = '';
+foreach (array('id="__NEXT_DATA__"', "id='__NEXT_DATA__'", 'id="__NEXT_DATA__" ', "id='__NEXT_DATA__' ") as $_nd_marker) {
+    $_nd_pos = strpos($html, $_nd_marker);
+    if ($_nd_pos !== false) {
+        $_nd_gt    = strpos($html, '>', $_nd_pos);
+        $_nd_end   = $_nd_gt !== false ? strpos($html, '</script>', $_nd_gt + 1) : false;
+        if ($_nd_gt !== false && $_nd_end !== false) {
+            $next_data_raw = substr($html, $_nd_gt + 1, $_nd_end - $_nd_gt - 1);
+        }
+        break;
+    }
+}
+if ($next_data_raw !== '') {
+    $next_json = json_decode(html_entity_decode(trim($next_data_raw), ENT_QUOTES, 'UTF-8'), true);
     if (is_array($next_json)) {
         $next_props = isset($next_json['props']['pageProps']) ? $next_json['props']['pageProps'] : $next_json;
 
@@ -3196,23 +3213,38 @@ if (preg_match('/<script[^>]*id=["\']__NEXT_DATA__["\'][^>]*>(.*?)<\/script>/si'
             }
         }
 
+        // ── Image extraction — cover all Klook JSON structures ───────────
+        // Klook uses many different key names across their various page types and API versions.
+        $img_scalar_keys = array(
+            'coverImageUrl','imageUrl','image','heroImageUrl','shareImage',
+            'imgUrl','coverImg','thumbnailUrl','thumbnail','cover','imgSrc',
+            'url','src','originalUrl','large','medium','original',
+        );
+        $img_array_keys = array(
+            'coverImages','images','gallery','photos','imageList',
+            'activityImages','packageImages','coverImageList',
+        );
+
         if (empty($data['image'])) {
-            $image_candidate = self::array_find_first($next_props, array('coverImageUrl', 'imageUrl', 'image', 'heroImageUrl', 'shareImage'));
-            if (is_string($image_candidate) && $image_candidate !== '') {
+            // First look for a scalar image URL
+            $image_candidate = self::array_find_first($next_props, $img_scalar_keys);
+            if (is_string($image_candidate) && preg_match('#https?://#', $image_candidate)) {
                 $data['image'] = $image_candidate;
             } elseif (is_array($image_candidate)) {
-                $possible = self::array_find_first($image_candidate, array('url', 'src', 'originalUrl'));
-                if (is_string($possible) && $possible !== '') {
+                $possible = self::array_find_first($image_candidate, $img_scalar_keys);
+                if (is_string($possible) && preg_match('#https?://#', $possible)) {
                     $data['image'] = $possible;
                 }
             }
         }
 
-        $next_images = self::array_collect_values($next_props, array('coverImageUrl', 'imageUrl', 'image', 'gallery', 'images', 'heroImageUrl'));
+        // Collect ALL image URLs from the JSON tree
+        $next_images = self::array_collect_values($next_props, array_merge($img_scalar_keys, $img_array_keys));
         if (!empty($next_images)) {
             $filtered_next = array();
             foreach ($next_images as $img) {
-                if (is_string($img) && preg_match('#https?://#i', $img) && (stripos($img, 'klook') !== false || preg_match('/\.(jpg|jpeg|png|webp)(\?|$)/i', $img))) {
+                if (is_string($img) && preg_match('#https?://#i', $img) &&
+                    (stripos($img, 'klook') !== false || preg_match('/\.(jpg|jpeg|png|webp)(\?|$)/i', $img))) {
                     $filtered_next[] = $img;
                 }
             }
