@@ -79,27 +79,35 @@ private static function get_scraperapi_key() {
 }
 
 private static function remote_get($url, $args = array()) {
+    // Rotate user agents to reduce blocking by Klook CDN
+    static $ua_index = 0;
+    $user_agents = array(
+        'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36',
+        'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/121.0.0.0 Safari/537.36',
+        'Mozilla/5.0 (Windows NT 10.0; Win64; x64; rv:124.0) Gecko/20100101 Firefox/124.0',
+        'Mozilla/5.0 (Macintosh; Intel Mac OS X 14_3) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/17.2 Safari/605.1.15',
+    );
+    $ua = $user_agents[$ua_index % count($user_agents)];
+    $ua_index++;
+
     $defaults = array(
         'timeout'     => 60,
         'redirection' => 5,
-        'user-agent'  => 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36',
+        'user-agent'  => $ua,
         'headers'     => array(
             'Accept'          => 'text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,*/*;q=0.8',
             'Accept-Language' => 'en-US,en;q=0.9',
+            'Accept-Encoding' => 'gzip, deflate',
             'Cache-Control'   => 'no-cache',
+            'Pragma'          => 'no-cache',
+            'Sec-Fetch-Dest'  => 'document',
+            'Sec-Fetch-Mode'  => 'navigate',
+            'Sec-Fetch-Site'  => 'none',
+            'Upgrade-Insecure-Requests' => '1',
         ),
     );
     $args = wp_parse_args($args, $defaults);
-
-    $target_url = $url;
-    if (strpos($url, 'klook.com') !== false) {
-        $api_key = self::get_scraperapi_key();
-        if (!empty($api_key)) {
-            $target_url = 'https://api.scraperapi.com/?api_key=' . rawurlencode($api_key) . '&keep_headers=true&url=' . rawurlencode($url);
-        }
-    }
-
-    return wp_remote_get($target_url, $args);
+    return wp_remote_get($url, $args);
 }
 
 private static function build_affiliate_redirect($url) {
@@ -473,32 +481,148 @@ private static function extract_hotel_links_from_html($body) {
     return array_values(array_unique(array_filter($links)));
 }
 
-private static function import_post_images($post_id, $main_image, $gallery = array()) {
-    $main_image = self::clean_image_urls(array($main_image), 1);
-    $main_image = !empty($main_image) ? $main_image[0] : '';
-    $gallery = self::clean_image_urls($gallery, 8);
-    if (empty($main_image) && empty($gallery)) {
-        return;
-    }
-    if (!function_exists('media_sideload_image')) {
+/**
+ * Download a remote image and attach it to a post.
+ * Uses a Klook Referer header so res.klook.com CDN allows the download.
+ * Falls back to storing the URL as external meta if download fails.
+ */
+private static function sideload_image_with_referer($image_url, $post_id, $referer = 'https://www.klook.com') {
+    if (!function_exists('wp_handle_sideload')) {
         require_once ABSPATH . 'wp-admin/includes/media.php';
         require_once ABSPATH . 'wp-admin/includes/file.php';
         require_once ABSPATH . 'wp-admin/includes/image.php';
     }
+
+    // Download the file via cURL with spoofed browser Referer so Klook CDN allows it
+    $body         = false;
+    $content_type = 'image/jpeg';
+    if (function_exists('curl_init')) {
+        $ch = curl_init($image_url);
+        curl_setopt_array($ch, array(
+            CURLOPT_RETURNTRANSFER => true,
+            CURLOPT_FOLLOWLOCATION => true,
+            CURLOPT_MAXREDIRS      => 5,
+            CURLOPT_TIMEOUT        => 30,
+            CURLOPT_SSL_VERIFYPEER => false,
+            CURLOPT_HTTPHEADER     => array(
+                'Referer: ' . $referer,
+                'User-Agent: Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36',
+                'Accept: image/avif,image/webp,image/apng,image/*,*/*;q=0.8',
+                'Accept-Language: en-US,en;q=0.9',
+            ),
+        ));
+        $body      = curl_exec($ch);
+        $http_code = curl_getinfo($ch, CURLINFO_HTTP_CODE);
+        $raw_ct    = curl_getinfo($ch, CURLINFO_CONTENT_TYPE);
+        curl_close($ch);
+        if (!$body || $http_code !== 200) {
+            return new WP_Error('download_failed', 'Could not download image (HTTP ' . $http_code . '): ' . $image_url);
+        }
+        if ($raw_ct) {
+            $content_type = strtok(trim($raw_ct), ';');
+        }
+    } else {
+        // Fallback: wp_remote_get
+        $response = wp_remote_get($image_url, array(
+            'timeout' => 30,
+            'headers' => array(
+                'Referer'         => $referer,
+                'User-Agent'      => 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36',
+                'Accept'          => 'image/avif,image/webp,image/apng,image/*,*/*;q=0.8',
+                'Accept-Language' => 'en-US,en;q=0.9',
+            ),
+        ));
+        if (is_wp_error($response) || wp_remote_retrieve_response_code($response) !== 200) {
+            return new WP_Error('download_failed', 'Could not download image: ' . $image_url);
+        }
+        $body = wp_remote_retrieve_body($response);
+        $raw_ct = wp_remote_retrieve_header($response, 'content-type');
+        if ($raw_ct) {
+            $content_type = strtok(trim($raw_ct), ';');
+        }
+    }
+    if (empty($body)) {
+        return new WP_Error('empty_body', 'Empty image response: ' . $image_url);
+    }
+
+    // Write to a temp file
+    $tmpfname = wp_tempnam($image_url);
+    if (!$tmpfname) {
+        return new WP_Error('tmp_failed', 'Could not create temp file');
+    }
+    // phpcs:ignore WordPress.WP.AlternativeFunctions.file_system_operations_file_put_contents
+    file_put_contents($tmpfname, $body);
+
+    // Map MIME to extension
+    $ext_map = array(
+        'image/jpeg' => 'jpg', 'image/jpg' => 'jpg',
+        'image/png'  => 'png', 'image/gif' => 'gif',
+        'image/webp' => 'webp', 'image/avif' => 'avif',
+    );
+    $ext = isset($ext_map[$content_type]) ? $ext_map[$content_type] : 'jpg';
+
+    // Build file data array for wp_handle_sideload
+    $basename = sanitize_file_name(basename(strtok($image_url, '?')));
+    if (!preg_match('/\.(jpg|jpeg|png|gif|webp|avif)$/i', $basename)) {
+        $basename .= '.' . $ext;
+    }
+    $file = array(
+        'name'     => $basename,
+        'type'     => $content_type ?: 'image/jpeg',
+        'tmp_name' => $tmpfname,
+        'error'    => 0,
+        'size'     => strlen($body),
+    );
+    $overrides = array('test_form' => false);
+    $sideload  = wp_handle_sideload($file, $overrides);
+
+    if (isset($sideload['error'])) {
+        @unlink($tmpfname);
+        return new WP_Error('sideload_failed', $sideload['error']);
+    }
+
+    $attachment = array(
+        'post_mime_type' => $sideload['type'],
+        'post_title'     => sanitize_text_field(pathinfo($sideload['file'], PATHINFO_FILENAME)),
+        'post_content'   => '',
+        'post_status'    => 'inherit',
+    );
+    $attachment_id = wp_insert_attachment($attachment, $sideload['file'], $post_id);
+    if (is_wp_error($attachment_id)) {
+        return $attachment_id;
+    }
+    $metadata = wp_generate_attachment_metadata($attachment_id, $sideload['file']);
+    wp_update_attachment_metadata($attachment_id, $metadata);
+
+    return $attachment_id;
+}
+
+private static function import_post_images($post_id, $main_image, $gallery = array()) {
+    $main_image = self::clean_image_urls(array($main_image), 1);
+    $main_image = !empty($main_image) ? $main_image[0] : '';
+    $gallery    = self::clean_image_urls($gallery, 8);
+    if (empty($main_image) && empty($gallery)) {
+        return;
+    }
+
     $gallery_attachment_ids = array();
-    $all_attachment_ids = array();
-    $main_key = self::image_compare_key($main_image);
+    $all_attachment_ids     = array();
+    $main_key               = self::image_compare_key($main_image);
+
     if (!empty($main_image)) {
-        $attachment_id = media_sideload_image($main_image, $post_id, null, 'id');
+        // Always store the raw URL first so the card displays even if sideload fails
+        update_post_meta($post_id, '_fth_external_image', esc_url_raw($main_image));
+
+        $attachment_id = self::sideload_image_with_referer($main_image, $post_id);
         if (!is_wp_error($attachment_id) && $attachment_id) {
             $attachment_id = (int) $attachment_id;
             set_post_thumbnail($post_id, $attachment_id);
             update_post_meta($post_id, '_fth_external_image', wp_get_attachment_url($attachment_id));
             $all_attachment_ids[] = $attachment_id;
-        } else {
-            update_post_meta($post_id, '_fth_external_image', esc_url_raw($main_image));
         }
+        // else: external URL is already saved above, no further action needed
     }
+
     $gallery_urls = array();
     foreach ((array) $gallery as $img) {
         if (!$img || self::image_compare_key($img) === $main_key) {
@@ -511,12 +635,12 @@ private static function import_post_images($post_id, $main_image, $gallery = arr
     }
     if (!empty($gallery_urls)) {
         foreach ($gallery_urls as $img) {
-            $gallery_id = media_sideload_image($img, $post_id, null, 'id');
+            $gallery_id = self::sideload_image_with_referer($img, $post_id);
             if (!is_wp_error($gallery_id) && $gallery_id) {
                 $gallery_id = (int) $gallery_id;
                 if (!in_array($gallery_id, $gallery_attachment_ids, true)) {
                     $gallery_attachment_ids[] = $gallery_id;
-                    $all_attachment_ids[] = $gallery_id;
+                    $all_attachment_ids[]     = $gallery_id;
                 }
             }
         }
@@ -704,6 +828,16 @@ public static function import_bulk_city() {
      * Import activity from Klook
      */
     private static function import_activity($url, $params, $original_deeplink = '') {
+        // Normalize Klook URL to English locale to prevent French/other-language content
+        if (strpos($url, 'klook.com') !== false) {
+            // Remove any existing locale prefix (e.g. /fr-FR/, /zh-HK/, /ar-SA/)
+            $url = preg_replace('#(https?://(?:www\.)?klook\.com)/[a-z]{2}[-_][A-Za-z]{2,4}/#', '$1/en-US/', $url);
+            // If no locale was present, inject /en-US/ after the domain
+            if (!preg_match('#klook\.com/en-US/#', $url)) {
+                $url = preg_replace('#(https?://(?:www\.)?klook\.com)/#', '$1/en-US/', $url);
+            }
+        }
+
         // Fetch the real Klook page
         $response = self::remote_get($url, array(
             'timeout'     => 45,

@@ -217,7 +217,7 @@ class FTH_Admin_Settings {
                 <span class="dashicons dashicons-admin-settings" style="color: <?php echo esc_attr($primary_color); ?>;"></span>
                 Travel Hub Settings
             </h1>
-            <div class="notice notice-info"><p><strong>Step 1:</strong> Save your affiliate, ScraperAPI and hero content here. <strong>Step 2:</strong> import cities/activities/hotels. <strong>Step 3:</strong> regenerate hubs if needed. <strong>Step 4:</strong> refresh permalinks once if you see a 404.</p></div>
+            <div class="notice notice-info"><p><strong>Step 1:</strong> Save your Klook affiliate ID and hero images here. <strong>Step 2:</strong> Go to <em>Import Activities</em> or <em>Import Hotels</em> to add content. <strong>Step 3:</strong> If pages show 404, go to <em>Settings → Permalinks</em> and click Save Changes.</p></div>
             
             <form method="post" action="options.php" class="fth-settings-form">
                 <?php settings_fields('fth_settings'); ?>
@@ -271,15 +271,7 @@ class FTH_Admin_Settings {
                                 <p class="description">Your Klook affiliate ID (e.g., 115387)</p>
                             </td>
                         </tr>
-                        <tr>
-                            <th scope="row">
-                                <label for="fth_scraperapi_key">ScraperAPI Key</label>
-                            </th>
-                            <td>
-                                <input type="text" id="fth_scraperapi_key" name="fth_scraperapi_key" value="<?php echo esc_attr($scraperapi_key); ?>" class="regular-text">
-                                <p class="description">Used to fetch Klook pages more reliably when direct requests are blocked.</p>
-                            </td>
-                        </tr>
+                        <!-- ScraperAPI removed – plugin now uses direct browser-like requests with Klook Referer for images -->
                         <tr>
                             <th scope="row">
                                 <label for="fth_booking_button_text">Booking Button Text</label>

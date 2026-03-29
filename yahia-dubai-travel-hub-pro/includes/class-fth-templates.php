@@ -137,6 +137,10 @@ class FTH_Templates {
         if (is_admin()) {
             return;
         }
+        // Don't redirect when already on a taxonomy/term page — it handles its own search
+        if (is_tax('travel_city') || is_tax('travel_country') || is_tax('travel_category')) {
+            return;
+        }
         $has_travel_query = isset($_GET['fth_search']) || isset($_GET['fth_city']) || isset($_GET['fth_country']) || isset($_GET['fth_category']);
         if (!$has_travel_query) {
             return;
@@ -251,6 +255,7 @@ class FTH_Templates {
         $affiliate_link  = get_post_meta($post_id, '_fth_affiliate_link', true);
         $image_url       = has_post_thumbnail($post_id) ? get_the_post_thumbnail_url($post_id, 'medium_large') : $external_image;
         if (!$image_url) { $image_url = 'https://images.unsplash.com/photo-1476514525535-07fb3b4ae5f1?w=800&q=80'; }
+        $image_url       = Flavor_Travel_Hub::fth_img_url($image_url);
         $cities          = wp_get_post_terms($post_id, 'travel_city');
         $city_name       = !empty($cities) ? $cities[0]->name : '';
         $categories      = wp_get_post_terms($post_id, 'travel_category');
@@ -326,7 +331,8 @@ class FTH_Templates {
         if (!$hero_image) {
             $hero_image = FTH_PLUGIN_URL . 'assets/images/city-placeholder.jpg';
         }
-        
+        $hero_image = Flavor_Travel_Hub::fth_img_url($hero_image);
+
         $link = get_term_link($term);
         $activity_count = self::get_city_activity_count($term->term_id);
         
@@ -371,6 +377,7 @@ class FTH_Templates {
         $symbol         = isset($currency_symbols[$currency]) ? $currency_symbols[$currency] : $currency . ' ';
         $image_url      = has_post_thumbnail($post_id) ? get_the_post_thumbnail_url($post_id, 'medium_large') : $external_image;
         if (!$image_url) { $image_url = 'https://images.unsplash.com/photo-1618773928121-c32242e63f39?w=800&q=80'; }
+        $image_url      = Flavor_Travel_Hub::fth_img_url($image_url);
         $has_discount   = $original_price && (float) $original_price > (float) $price && (float) $price > 0;
         $discount_pct   = $has_discount ? round((1 - (float)$price / (float)$original_price) * 100) : 0;
         $link           = $affiliate_link ?: $permalink;
