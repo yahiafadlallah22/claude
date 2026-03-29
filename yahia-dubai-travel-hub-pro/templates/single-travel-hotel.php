@@ -93,7 +93,11 @@ body.single-travel_hotel .widget-area,body.single-travel_hotel .sidebar,body.sin
 .klh-sidebar{position:sticky;top:90px;height:fit-content}
 .klh-book-box{background:#fff;border-radius:16px;padding:24px;box-shadow:0 2px 12px rgba(0,0,0,.07)}
 .klh-price-from{font-size:13px;color:#666;margin-bottom:4px}
-.klh-price-orig{font-size:14px;color:#999;text-decoration:line-through;margin-bottom:2px}
+@keyframes klh-deal-glow{0%,100%{box-shadow:0 2px 8px rgba(229,62,62,.4)}50%{box-shadow:0 4px 18px rgba(229,62,62,.75)}}
+.klh-deal-flag{background:linear-gradient(135deg,#e53e3e,#ff6b35);color:#fff;font-weight:800;font-size:13px;border-radius:8px;padding:7px 12px;margin-bottom:12px;text-align:center;animation:klh-deal-glow 2s ease-in-out infinite}
+.klh-price-orig{font-size:14px;color:#999;margin-bottom:4px;display:flex;align-items:center;flex-wrap:wrap;gap:8px}
+.klh-price-orig s{text-decoration:line-through}
+.klh-saving-pill{background:linear-gradient(90deg,#fef3c7,#fde68a);color:#92400e;font-size:11px;font-weight:800;border-radius:999px;padding:2px 9px}
 .klh-price-curr{font-size:36px;font-weight:900;color:<?php echo esc_attr($primary); ?>;margin-bottom:2px}
 .klh-price-note{font-size:12px;color:#999;margin-bottom:18px}
 .klh-cta{display:flex;align-items:center;justify-content:center;gap:10px;width:100%;padding:16px;border-radius:12px;background:<?php echo esc_attr($primary); ?>;color:#fff!important;font-weight:800;font-size:16px;letter-spacing:.3px;margin-bottom:16px;transition:opacity .2s}
@@ -275,9 +279,16 @@ body.single-travel_hotel .widget-area,body.single-travel_hotel .sidebar,body.sin
 
     <aside class="klh-sidebar">
       <div class="klh-book-box">
+        <?php if ($discount_pct >= 5): ?>
+        <div class="klh-deal-flag">🏷️ Yahia Deal · -<?php echo $discount_pct; ?>% OFF</div>
+        <?php endif; ?>
         <div class="klh-price-from">From</div>
         <?php if ($orig_price && (float)$orig_price > (float)$price): ?>
-        <div class="klh-price-orig"><?php echo esc_html($sym . number_format((float)$orig_price, 2)); ?></div>
+        <div class="klh-price-orig">
+          <s><?php echo esc_html($sym . number_format((float)$orig_price, 2)); ?></s>
+          <?php $saving_amt = round((float)$orig_price - (float)$price, 2); ?>
+          <span class="klh-saving-pill">You save <?php echo esc_html($sym . number_format($saving_amt, 0)); ?> ✨</span>
+        </div>
         <?php endif; ?>
         <?php if ($price): ?>
         <div class="klh-price-curr"><?php echo esc_html($sym . number_format((float)$price, 2)); ?></div>
