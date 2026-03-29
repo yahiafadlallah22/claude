@@ -217,7 +217,44 @@ private static function fetch_klook_html($url) {
         }
     }
 
-    // ── 3. Wayback Machine CDX API → precise timestamp → raw if_ fetch ─
+    // ── 3. ScraperAPI with JavaScript rendering (headless Chrome) ────
+    // ScraperAPI handles Cloudflare bypass with rotating proxies.
+    // render=true uses a real headless Chrome → guaranteed __NEXT_DATA__ for Next.js pages.
+    $sa_key = self::get_scraperapi_key();
+    if (!empty($sa_key)) {
+        $sa_url = 'https://api.scraperapi.com?' . http_build_query(array(
+            'api_key'      => $sa_key,
+            'url'          => $url,
+            'render'       => 'true',
+            'country_code' => 'us',
+        ));
+        $sa_r = self::remote_get($sa_url, array('timeout' => 120));
+        if (!is_wp_error($sa_r)) {
+            $sa_b = wp_remote_retrieve_body($sa_r);
+            if (!empty($sa_b) && strpos($sa_b, '__NEXT_DATA__') !== false) {
+                return array('body' => $sa_b, 'url' => $url, 'source' => 'scraperapi');
+            }
+            if (!empty($sa_b) && empty($best_body)) $best_body = $sa_b;
+        }
+        // Also try without render (faster, uses less credits)
+        if (!isset($sa_b) || empty($sa_b)) {
+            $sa_url2 = 'https://api.scraperapi.com?' . http_build_query(array(
+                'api_key'      => $sa_key,
+                'url'          => $url,
+                'country_code' => 'us',
+            ));
+            $sa_r2 = self::remote_get($sa_url2, array('timeout' => 60));
+            if (!is_wp_error($sa_r2)) {
+                $sa_b2 = wp_remote_retrieve_body($sa_r2);
+                if (!empty($sa_b2) && strpos($sa_b2, '__NEXT_DATA__') !== false) {
+                    return array('body' => $sa_b2, 'url' => $url, 'source' => 'scraperapi_fast');
+                }
+                if (!empty($sa_b2) && empty($best_body)) $best_body = $sa_b2;
+            }
+        }
+    }
+
+    // ── 4. Wayback Machine CDX API → precise timestamp → raw if_ fetch ─
     // NOTE: Google Web Cache was permanently shut down in February 2024.
     // We use the CDX API instead: it returns the exact snapshot timestamp,
     // then we fetch the raw HTML using the "if_" modifier which strips the
@@ -251,7 +288,7 @@ private static function fetch_klook_html($url) {
         }
     }
 
-    // ── 4. Wayback Machine availability API (simpler fallback) ────────
+    // ── 5. Wayback Machine availability API (simpler fallback) ────────
     $avail_r = self::remote_get('https://archive.org/wayback/available?url=' . rawurlencode($url_bare), array('timeout' => 20));
     if (!is_wp_error($avail_r)) {
         $avail = json_decode(wp_remote_retrieve_body($avail_r), true);
@@ -1362,26 +1399,41 @@ public static function import_bulk_city() {
             update_post_meta($post_id, '_fth_is_bestseller', '1');
         }
         
-        // Taxonomies
+        // Taxonomies — reuse the already-sideloaded thumbnail as hero image for city/country
+        $thumb_id = get_post_thumbnail_id($post_id);
         if (!empty($params['city'])) {
             wp_set_object_terms($post_id, intval($params['city']), 'travel_city');
-            // Auto-generate hero image for city if missing
             $city_id = intval($params['city']);
-            if (!get_term_meta($city_id, 'fth_hero_image', true) && class_exists('Flavor_Travel_Hub')) {
+            if (!get_term_meta($city_id, 'fth_hero_image', true)) {
                 $city_t = get_term($city_id, 'travel_city');
                 if ($city_t && !is_wp_error($city_t)) {
-                    Flavor_Travel_Hub::generate_taxonomy_image($city_t->name, $city_id, 'travel_city');
+                    if ($thumb_id) {
+                        // Use the real Klook photo (already downloaded to WP media)
+                        update_term_meta($city_id, 'fth_hero_image', wp_get_attachment_url($thumb_id));
+                        update_term_meta($city_id, 'fth_hero_image_id', $thumb_id);
+                    } elseif (!empty($data['image'])) {
+                        // Store external URL as fallback (proxy will display it)
+                        update_term_meta($city_id, 'fth_hero_image', esc_url_raw($data['image']));
+                    } elseif (class_exists('Flavor_Travel_Hub')) {
+                        Flavor_Travel_Hub::generate_taxonomy_image($city_t->name, $city_id, 'travel_city');
+                    }
                 }
             }
         }
         if (!empty($params['country'])) {
             wp_set_object_terms($post_id, intval($params['country']), 'travel_country');
-            // Auto-generate hero image for country if missing
             $country_id = intval($params['country']);
-            if (!get_term_meta($country_id, 'fth_hero_image', true) && class_exists('Flavor_Travel_Hub')) {
+            if (!get_term_meta($country_id, 'fth_hero_image', true)) {
                 $country_t = get_term($country_id, 'travel_country');
                 if ($country_t && !is_wp_error($country_t)) {
-                    Flavor_Travel_Hub::generate_taxonomy_image($country_t->name, $country_id, 'travel_country');
+                    if ($thumb_id) {
+                        update_term_meta($country_id, 'fth_hero_image', wp_get_attachment_url($thumb_id));
+                        update_term_meta($country_id, 'fth_hero_image_id', $thumb_id);
+                    } elseif (!empty($data['image'])) {
+                        update_term_meta($country_id, 'fth_hero_image', esc_url_raw($data['image']));
+                    } elseif (class_exists('Flavor_Travel_Hub')) {
+                        Flavor_Travel_Hub::generate_taxonomy_image($country_t->name, $country_id, 'travel_country');
+                    }
                 }
             }
         }
@@ -1716,20 +1768,39 @@ public static function import_bulk_city() {
         if (!empty($data['inclusions'])) update_post_meta($post_id, '_fth_inclusions', $data['inclusions']);
         if (!empty($data['faq']))        update_post_meta($post_id, '_fth_faq', $data['faq']);
         self::import_post_images($post_id, !empty($data['image']) ? $data['image'] : '', !empty($data['images']) && is_array($data['images']) ? $data['images'] : array());
+        $thumb_id = get_post_thumbnail_id($post_id);
         if (!empty($params['city'])) {
             wp_set_object_terms($post_id, intval($params['city']), 'travel_city');
             $city_id = intval($params['city']);
-            if (!get_term_meta($city_id, 'fth_hero_image', true) && class_exists('Flavor_Travel_Hub')) {
+            if (!get_term_meta($city_id, 'fth_hero_image', true)) {
                 $city_t = get_term($city_id, 'travel_city');
-                if ($city_t && !is_wp_error($city_t)) { Flavor_Travel_Hub::generate_taxonomy_image($city_t->name, $city_id, 'travel_city'); }
+                if ($city_t && !is_wp_error($city_t)) {
+                    if ($thumb_id) {
+                        update_term_meta($city_id, 'fth_hero_image', wp_get_attachment_url($thumb_id));
+                        update_term_meta($city_id, 'fth_hero_image_id', $thumb_id);
+                    } elseif (!empty($data['image'])) {
+                        update_term_meta($city_id, 'fth_hero_image', esc_url_raw($data['image']));
+                    } elseif (class_exists('Flavor_Travel_Hub')) {
+                        Flavor_Travel_Hub::generate_taxonomy_image($city_t->name, $city_id, 'travel_city');
+                    }
+                }
             }
         }
         if (!empty($params['country'])) {
             wp_set_object_terms($post_id, intval($params['country']), 'travel_country');
             $country_id = intval($params['country']);
-            if (!get_term_meta($country_id, 'fth_hero_image', true) && class_exists('Flavor_Travel_Hub')) {
+            if (!get_term_meta($country_id, 'fth_hero_image', true)) {
                 $country_t = get_term($country_id, 'travel_country');
-                if ($country_t && !is_wp_error($country_t)) { Flavor_Travel_Hub::generate_taxonomy_image($country_t->name, $country_id, 'travel_country'); }
+                if ($country_t && !is_wp_error($country_t)) {
+                    if ($thumb_id) {
+                        update_term_meta($country_id, 'fth_hero_image', wp_get_attachment_url($thumb_id));
+                        update_term_meta($country_id, 'fth_hero_image_id', $thumb_id);
+                    } elseif (!empty($data['image'])) {
+                        update_term_meta($country_id, 'fth_hero_image', esc_url_raw($data['image']));
+                    } elseif (class_exists('Flavor_Travel_Hub')) {
+                        Flavor_Travel_Hub::generate_taxonomy_image($country_t->name, $country_id, 'travel_country');
+                    }
+                }
             }
         }
         self::generate_hotel_seo_meta($post_id, get_post($post_id));
