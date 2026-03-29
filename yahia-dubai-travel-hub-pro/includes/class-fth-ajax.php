@@ -192,78 +192,158 @@ private static function build_affiliate_redirect($url) {
  * @return array  { body: string, url: string, source: string }
  */
 private static function fetch_klook_html($url) {
-    $result = array('body' => '', 'url' => $url, 'source' => 'none');
-    $best_body = ''; // best non-empty body even if no __NEXT_DATA__
+    $result    = array('body' => '', 'url' => $url, 'source' => 'none');
+    $best_body = '';
 
-    // ── 1. Direct fetch ───────────────────────────────────────────────
-    $r = self::remote_get($url, array('timeout' => 60));
+    // ── 1. Direct cURL with Chrome 124 headers ────────────────────────
+    $r = self::remote_get($url, array('timeout' => 45));
     if (!is_wp_error($r)) {
         $b = wp_remote_retrieve_body($r);
-        if (!empty($b)) {
-            if (strpos($b, '__NEXT_DATA__') !== false) {
-                return array('body' => $b, 'url' => $url, 'source' => 'direct');
-            }
-            $best_body = $b;
+        if (!empty($b) && strpos($b, '__NEXT_DATA__') !== false) {
+            return array('body' => $b, 'url' => $url, 'source' => 'direct');
         }
+        if (!empty($b)) $best_body = $b;
     }
 
     // ── 2. Without /en-US/ locale ────────────────────────────────────
     if (strpos($url, '/en-US/') !== false) {
         $url_nl = preg_replace('#/en-US/#', '/', $url);
-        $r2 = self::remote_get($url_nl, array('timeout' => 60));
+        $r2 = self::remote_get($url_nl, array('timeout' => 45));
         if (!is_wp_error($r2)) {
             $b2 = wp_remote_retrieve_body($r2);
-            if (!empty($b2)) {
-                if (strpos($b2, '__NEXT_DATA__') !== false) {
-                    return array('body' => $b2, 'url' => $url_nl, 'source' => 'direct_noloc');
-                }
-                if (empty($best_body)) $best_body = $b2;
+            if (!empty($b2) && strpos($b2, '__NEXT_DATA__') !== false) {
+                return array('body' => $b2, 'url' => $url_nl, 'source' => 'direct_noloc');
             }
         }
     }
 
-    // ── 3. Google Web Cache (Googlebot is CF-whitelisted) ────────────
-    $url_bare = preg_replace('#^https?://#', '', $url); // strip scheme
-    $gc_url   = 'https://webcache.googleusercontent.com/search?q=cache:' . rawurlencode($url_bare) . '&hl=en&gl=us';
-    $r3 = self::remote_get($gc_url, array(
-        'timeout' => 45,
-        'headers' => array('Referer' => 'https://www.google.com/'),
+    // ── 3. Wayback Machine CDX API → precise timestamp → raw if_ fetch ─
+    // NOTE: Google Web Cache was permanently shut down in February 2024.
+    // We use the CDX API instead: it returns the exact snapshot timestamp,
+    // then we fetch the raw HTML using the "if_" modifier which strips the
+    // WB toolbar so __NEXT_DATA__ is preserved intact.
+    $url_bare = preg_replace('#^https?://#', '', rtrim($url, '/'));
+    $cdx_q    = http_build_query(array(
+        'url'    => $url_bare,
+        'output' => 'json',
+        'fl'     => 'timestamp',
+        'limit'  => 1,
+        'from'   => date('Ymd', strtotime('-1 year')),
+        'to'     => date('Ymd'),
+        'filter' => 'statuscode:200',
     ));
-    if (!is_wp_error($r3)) {
-        $b3 = wp_remote_retrieve_body($r3);
-        $c3 = wp_remote_retrieve_response_code($r3);
-        if ($c3 === 200 && !empty($b3)) {
-            if (strpos($b3, '__NEXT_DATA__') !== false) {
-                return array('body' => $b3, 'url' => $url, 'source' => 'google_cache');
-            }
-            if (empty($best_body)) $best_body = $b3;
-        }
-    }
-
-    // ── 4. Wayback Machine latest snapshot ───────────────────────────
-    $wb_api = 'https://archive.org/wayback/available?url=' . rawurlencode($url_bare);
-    $r4 = self::remote_get($wb_api, array('timeout' => 20));
-    if (!is_wp_error($r4)) {
-        $wb_json = json_decode(wp_remote_retrieve_body($r4), true);
-        $snap    = isset($wb_json['archived_snapshots']['closest']['url']) ? $wb_json['archived_snapshots']['closest']['url'] : '';
-        if (!empty($snap)) {
-            $r5 = self::remote_get($snap, array('timeout' => 60));
-            if (!is_wp_error($r5)) {
-                $b5 = wp_remote_retrieve_body($r5);
-                if (!empty($b5)) {
-                    if (strpos($b5, '__NEXT_DATA__') !== false) {
-                        return array('body' => $b5, 'url' => $url, 'source' => 'wayback');
-                    }
-                    if (empty($best_body)) $best_body = $b5;
+    $cdx_r = self::remote_get('https://web.archive.org/cdx/search/cdx?' . $cdx_q, array('timeout' => 25));
+    if (!is_wp_error($cdx_r)) {
+        $rows = json_decode(wp_remote_retrieve_body($cdx_r), true);
+        // Format: [["timestamp"], ["20241215120000"]]  (header row + data row)
+        if (is_array($rows) && count($rows) >= 2 && isset($rows[1][0])) {
+            $ts     = $rows[1][0];
+            // if_ = serve raw archived HTML without WB toolbar/banner
+            $wb_url = 'https://web.archive.org/web/' . $ts . 'if_/' . $url;
+            $wb_r   = self::remote_get($wb_url, array('timeout' => 60));
+            if (!is_wp_error($wb_r)) {
+                $wb_b = wp_remote_retrieve_body($wb_r);
+                if (!empty($wb_b) && strpos($wb_b, '__NEXT_DATA__') !== false) {
+                    return array('body' => $wb_b, 'url' => $url, 'source' => 'wayback_cdx');
                 }
+                if (!empty($wb_b) && empty($best_body)) $best_body = $wb_b;
             }
         }
     }
 
-    // Return best non-empty body (og: meta tags may still be present)
+    // ── 4. Wayback Machine availability API (simpler fallback) ────────
+    $avail_r = self::remote_get('https://archive.org/wayback/available?url=' . rawurlencode($url_bare), array('timeout' => 20));
+    if (!is_wp_error($avail_r)) {
+        $avail = json_decode(wp_remote_retrieve_body($avail_r), true);
+        $snap  = isset($avail['archived_snapshots']['closest']['url']) ? $avail['archived_snapshots']['closest']['url'] : '';
+        if (!empty($snap)) {
+            // Convert standard WB URL to if_ (raw) version
+            $snap_raw = preg_replace('#/web/(\d+)/#', '/web/${1}if_/', $snap);
+            $snap_r   = self::remote_get($snap_raw, array('timeout' => 60));
+            if (!is_wp_error($snap_r)) {
+                $snap_b = wp_remote_retrieve_body($snap_r);
+                if (!empty($snap_b) && strpos($snap_b, '__NEXT_DATA__') !== false) {
+                    return array('body' => $snap_b, 'url' => $url, 'source' => 'wayback_avail');
+                }
+                if (!empty($snap_b) && empty($best_body)) $best_body = $snap_b;
+            }
+        }
+    }
+
     $result['body'] = $best_body;
     return $result;
 }
+
+/**
+ * Discover activity or hotel URLs for a city directly from the Wayback Machine CDX index.
+ * This bypasses Cloudflare entirely — no live Klook page is fetched.
+ *
+ * @param string $type      'activity' or 'hotel'
+ * @param string $city_slug City slug, e.g. 'dubai'
+ * @param int    $limit     Max URLs to return
+ * @return string[]  Klook URLs (normalised to /en-US/)
+ */
+private static function discover_klook_urls_via_cdx($type, $city_slug, $limit = 100) {
+    if (empty($city_slug)) return array();
+
+    if ($type === 'hotel') {
+        // Hotel URLs always contain the city slug: /en-US/hotels/{city}/hotel/{id}-{slug}/
+        $pattern  = 'www.klook.com/*/hotels/' . $city_slug . '/hotel/*';
+        $match_type = 'prefix'; // won't work with * in middle; use domain match
+        // Use domain + path prefix trick via filter
+        $q = http_build_query(array(
+            'url'        => 'www.klook.com/en-US/hotels/' . $city_slug . '/hotel/',
+            'output'     => 'json',
+            'fl'         => 'original',
+            'filter'     => 'statuscode:200',
+            'collapse'   => 'urlkey',
+            'limit'      => min($limit + 50, 300),
+            'matchType'  => 'prefix',
+            'from'       => date('Ymd', strtotime('-2 years')),
+        ));
+    } else {
+        // Activity URLs: /en-US/activity/{id}-{slug-containing-city}/
+        // Use CDX with city slug filter on the original URL
+        $q = http_build_query(array(
+            'url'        => 'www.klook.com/en-US/activity/',
+            'output'     => 'json',
+            'fl'         => 'original',
+            'collapse'   => 'urlkey',
+            'limit'      => min($limit * 6, 600),
+            'matchType'  => 'prefix',
+            'from'       => date('Ymd', strtotime('-2 years')),
+        ));
+        // append double filter (CDX allows repeated filter params)
+        $q .= '&filter=statuscode:200&filter=original:.*' . rawurlencode($city_slug) . '.*';
+    }
+
+    $r = self::remote_get('https://web.archive.org/cdx/search/cdx?' . $q, array('timeout' => 35));
+    if (is_wp_error($r)) return array();
+
+    $rows = json_decode(wp_remote_retrieve_body($r), true);
+    if (!is_array($rows) || count($rows) < 2) return array();
+
+    $urls = array();
+    foreach (array_slice($rows, 1) as $row) { // skip header row
+        $u = isset($row[0]) ? $row[0] : '';
+        if (!$u) continue;
+        if (!preg_match('#^https?://#', $u)) $u = 'https://' . $u;
+        // Must be a single activity/hotel page, not a listing
+        if ($type === 'activity' && !preg_match('#/activity/\d+-#', $u)) continue;
+        if ($type === 'hotel'    && !preg_match('#/hotel/\d+-#', $u))    continue;
+        // For activities: confirm city slug present
+        if ($type === 'activity' && stripos($u, $city_slug) === false) continue;
+        // Normalise to /en-US/
+        $u = preg_replace('#(klook\.com)/[a-z]{2}[-_][A-Za-z]{2,4}/#', '$1/en-US/', $u);
+        if (!in_array($u, $urls, true)) {
+            $urls[] = $u;
+        }
+        if (count($urls) >= $limit) break;
+    }
+    return $urls;
+}
+
+
 
 private static function array_find_first($data, $keys) {
     if (!is_array($data)) {
@@ -990,32 +1070,19 @@ public static function import_bulk_city() {
         $links = array();
         $notes = array();
         foreach (array_unique($expanded) as $candidate_url) {
-            $body = '';
-            $r = self::remote_get($candidate_url, array('timeout' => 60));
-            if (!is_wp_error($r)) {
-                $body = wp_remote_retrieve_body($r);
-            }
-            // If direct fetch was blocked (CF), try Google Cache for the listing page
-            if (empty($body) || (strpos($body, '__NEXT_DATA__') === false && strpos($body, '/activity/') === false)) {
-                $url_bare = preg_replace('#^https?://#', '', $candidate_url);
-                $gc_url   = 'https://webcache.googleusercontent.com/search?q=cache:' . rawurlencode($url_bare) . '&hl=en&gl=us';
-                $r_gc = self::remote_get($gc_url, array('timeout' => 45, 'headers' => array('Referer' => 'https://www.google.com/')));
-                if (!is_wp_error($r_gc)) {
-                    $gc_body = wp_remote_retrieve_body($r_gc);
-                    $gc_code = wp_remote_retrieve_response_code($r_gc);
-                    if ($gc_code === 200 && !empty($gc_body) && strpos($gc_body, '/activity/') !== false) {
-                        $body  = $gc_body;
-                        $notes[] = 'Used Google Cache for: ' . $candidate_url;
-                    }
-                }
-            }
+            // Use full fallback chain: direct → no-locale → WB CDX → WB availability
+            $fetch = self::fetch_klook_html($candidate_url);
+            $body  = $fetch['body'];
             if (empty($body)) {
-                $notes[] = 'Empty response for ' . $candidate_url;
+                $notes[] = 'Could not fetch: ' . $candidate_url;
                 continue;
             }
             if (strpos($body, '__NEXT_DATA__') === false && strpos($body, '/activity/') === false) {
-                $notes[] = 'Blocked (no content) on ' . $candidate_url;
+                $notes[] = 'No content (' . $fetch['source'] . '): ' . $candidate_url;
                 continue;
+            }
+            if ($fetch['source'] !== 'direct') {
+                $notes[] = 'Fetched via ' . $fetch['source'] . ': ' . $candidate_url;
             }
             $found = self::extract_activity_links_from_html($body);
             if (!empty($found)) {
@@ -1023,9 +1090,29 @@ public static function import_bulk_city() {
             }
             if (count($links) >= $limit) break;
         }
+
+        // CDX fallback: if listing pages gave nothing, discover activity URLs directly
+        // from the Wayback Machine archive index (no live Klook page required).
+        if (empty($links)) {
+            $city_slug_cdx = '';
+            if (preg_match('#/destination/c\d+-([a-z0-9-]+)#i', $real_url, $csm)) {
+                $city_slug_cdx = $csm[1];
+            } elseif ($city) {
+                $ct = get_term($city, 'travel_city');
+                if ($ct && !is_wp_error($ct)) $city_slug_cdx = $ct->slug;
+            }
+            if (!empty($city_slug_cdx)) {
+                $cdx_urls = self::discover_klook_urls_via_cdx('activity', $city_slug_cdx, $limit);
+                if (!empty($cdx_urls)) {
+                    $links = $cdx_urls;
+                    $notes[] = 'Wayback CDX: found ' . count($cdx_urls) . ' activity URLs for "' . $city_slug_cdx . '"';
+                }
+            }
+        }
+
         $links = array_values(array_unique($links));
         if (empty($links)) {
-            self::send_json_error_clean('No activity links found. ' . implode(' | ', array_slice($notes, 0, 3)) . ' Tip: Try a URL like https://www.klook.com/en-US/destination/c78-dubai/');
+            self::send_json_error_clean('No activity links found. ' . implode(' | ', array_slice($notes, 0, 5)) . ' Tip: Try a URL like https://www.klook.com/en-US/destination/c78-dubai/');
         }
         $links = array_slice($links, 0, $limit);
 
@@ -1494,35 +1581,40 @@ public static function import_bulk_city() {
             $listing_map = array();
             $notes = array();
             foreach (array_unique($candidate_urls) as $candidate_url) {
-                $body = '';
-                $r = self::remote_get($candidate_url, array('timeout' => 60));
-                if (!is_wp_error($r)) {
-                    $body = wp_remote_retrieve_body($r);
-                }
-                // If CF blocked, try Google Cache for the listing page
-                if (empty($body) || (strpos($body, '__NEXT_DATA__') === false && strpos($body, '/hotels/') === false)) {
-                    $url_bare = preg_replace('#^https?://#', '', $candidate_url);
-                    $gc_url   = 'https://webcache.googleusercontent.com/search?q=cache:' . rawurlencode($url_bare) . '&hl=en&gl=us';
-                    $r_gc = self::remote_get($gc_url, array('timeout' => 45, 'headers' => array('Referer' => 'https://www.google.com/')));
-                    if (!is_wp_error($r_gc)) {
-                        $gc_body = wp_remote_retrieve_body($r_gc);
-                        $gc_code = wp_remote_retrieve_response_code($r_gc);
-                        if ($gc_code === 200 && !empty($gc_body) && strpos($gc_body, '/hotels/') !== false) {
-                            $body  = $gc_body;
-                            $notes[] = 'Used Google Cache for: ' . $candidate_url;
-                        }
-                    }
-                }
+                $fetch = self::fetch_klook_html($candidate_url);
+                $body  = $fetch['body'];
                 if (!$body) {
-                    $notes[] = 'Empty response for ' . $candidate_url;
+                    $notes[] = 'Could not fetch: ' . $candidate_url;
                     continue;
                 }
-                $links = array_merge($links, self::extract_hotel_links_from_html($body));
+                if ($fetch['source'] !== 'direct') {
+                    $notes[] = 'Fetched via ' . $fetch['source'] . ': ' . $candidate_url;
+                }
+                $links       = array_merge($links, self::extract_hotel_links_from_html($body));
                 $listing_map = array_merge($listing_map, self::extract_hotel_listing_items_from_html($body));
             }
+
+            // CDX fallback: discover hotel URLs from WB archive index if listing pages failed
+            if (empty($links)) {
+                $city_slug_cdx = '';
+                if (preg_match('#/hotels/([a-z0-9-]+)/#i', $real_url, $csm)) {
+                    $city_slug_cdx = $csm[1];
+                } elseif ($city) {
+                    $ct = get_term($city, 'travel_city');
+                    if ($ct && !is_wp_error($ct)) $city_slug_cdx = $ct->slug;
+                }
+                if (!empty($city_slug_cdx)) {
+                    $cdx_urls = self::discover_klook_urls_via_cdx('hotel', $city_slug_cdx, $limit);
+                    if (!empty($cdx_urls)) {
+                        $links = $cdx_urls;
+                        $notes[] = 'Wayback CDX: found ' . count($cdx_urls) . ' hotel URLs for "' . $city_slug_cdx . '"';
+                    }
+                }
+            }
+
             $links = array_values(array_unique($links));
             if (empty($links)) {
-                self::send_json_error_clean('No hotel links found on this listing page. ' . implode(' | ', array_slice($notes, 0, 3)));
+                self::send_json_error_clean('No hotel links found. ' . implode(' | ', array_slice($notes, 0, 5)));
             }
             $links = array_slice($links, 0, $limit);
             $imported = 0; $checked = 0; $errors = array(); $stopped_early = false;

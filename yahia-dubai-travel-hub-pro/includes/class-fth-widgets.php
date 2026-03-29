@@ -191,14 +191,18 @@ class FTH_Widget_Categories extends WP_Widget {
             if (!$fth_cat_widget_css_done) {
                 $fth_cat_widget_css_done = true;
                 echo '<style>
-@keyframes fth-emoji-wobble{0%,100%{transform:rotate(0) scale(1)}25%{transform:rotate(-14deg) scale(1.18)}75%{transform:rotate(14deg) scale(1.18)}}
-@keyframes fth-emoji-pop{0%{transform:scale(1)}50%{transform:scale(1.35)}100%{transform:scale(1)}}
+@keyframes fth-emoji-float{0%,100%{transform:translateY(0) rotate(-3deg)}50%{transform:translateY(-5px) rotate(3deg)}}
+@keyframes fth-emoji-wobble{0%,100%{transform:rotate(0) scale(1)}20%{transform:rotate(-16deg) scale(1.25)}70%{transform:rotate(16deg) scale(1.25)}}
 .fth-widget-categories-list{list-style:none;padding:0;margin:0}
 .fth-widget-categories-list li{margin-bottom:4px}
-.fth-widget-categories-list a{display:flex;align-items:center;gap:8px;padding:7px 10px;border-radius:10px;font-size:14px;font-weight:600;text-decoration:none;transition:background .2s,color .2s}
-.fth-widget-categories-list a:hover{background:rgba(41,137,192,.08)}
-.fth-widget-categories-list a:hover .fth-cat-emoji{animation:fth-emoji-wobble .5s ease-in-out}
-.fth-cat-emoji{display:inline-block;font-size:18px;line-height:1;width:24px;text-align:center;flex-shrink:0}
+.fth-widget-categories-list a{display:flex;align-items:center;gap:8px;padding:7px 10px;border-radius:10px;font-size:14px;font-weight:600;text-decoration:none;transition:background .2s}
+.fth-widget-categories-list a:hover{background:rgba(41,137,192,.09)}
+.fth-cat-emoji{display:inline-block;font-size:19px;line-height:1;width:26px;text-align:center;flex-shrink:0;animation:fth-emoji-float 2.8s ease-in-out infinite}
+.fth-widget-categories-list li:nth-child(2n) .fth-cat-emoji{animation-delay:.4s}
+.fth-widget-categories-list li:nth-child(3n) .fth-cat-emoji{animation-delay:.8s}
+.fth-widget-categories-list li:nth-child(4n) .fth-cat-emoji{animation-delay:1.2s}
+.fth-widget-categories-list li:nth-child(5n) .fth-cat-emoji{animation-delay:1.6s}
+.fth-widget-categories-list a:hover .fth-cat-emoji{animation:fth-emoji-wobble .45s ease-in-out forwards}
 .fth-cat-count{margin-left:auto;background:#f0f4f8;border-radius:999px;font-size:11px;color:#666;padding:1px 7px;font-weight:500}
 </style>';
             }
