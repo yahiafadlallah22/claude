@@ -2,8 +2,8 @@
 /**
  * Plugin Name: Yahia Dubai Travel Hub Pro
  * Plugin URI: https://flavor.ae/
- * Description: Yahia Dubai travel hub – attractions, tours and hotels imported from Klook with affiliate links, full AIOSEO automation, Klook-style design and WP Residence-safe templates. v1.7
- * Version: 1.7.0
+ * Description: Yahia Dubai travel hub – attractions, tours and hotels imported from Klook with affiliate links, full AIOSEO automation, Klook-style design and WP Residence-safe templates. v1.9
+ * Version: 1.9.0
  * Author: Flavor
  * Author URI: https://flavor.ae/
  * Text Domain: flavor-travel-hub
@@ -20,7 +20,7 @@ if (!defined('ABSPATH')) {
 }
 
 // Plugin constants
-define('FTH_VERSION', '1.7.0');
+define('FTH_VERSION', '1.9.0');
 define('FTH_PLUGIN_DIR', plugin_dir_path(__FILE__));
 define('FTH_PLUGIN_URL', plugin_dir_url(__FILE__));
 define('FTH_PLUGIN_BASENAME', plugin_basename(__FILE__));
@@ -93,6 +93,7 @@ final class Flavor_Travel_Hub {
         
         add_action('init', array($this, 'init'), 0);
         add_action('init', array($this, 'maybe_create_missing_pages'), 25);
+        add_action('init', array($this, 'handle_image_proxy'), 1);
         add_action('plugins_loaded', array($this, 'load_textdomain'));
     }
     
@@ -345,6 +346,146 @@ final class Flavor_Travel_Hub {
         return $scheme . '://' . $host . $path . '?' . http_build_query($query);
     }
     
+    /**
+     * Return a proxied URL for Klook CDN images so browsers can load them
+     * without being blocked by res.klook.com CDN hotlink protection.
+     * Non-Klook URLs are returned unchanged.
+     */
+    public static function fth_img_url($url) {
+        if (empty($url)) {
+            return $url;
+        }
+        $host = parse_url($url, PHP_URL_HOST);
+        if (!$host || strpos($host, 'klook.com') === false) {
+            return $url;
+        }
+        // Base64url-encode the original URL (no padding)
+        $encoded = rtrim(strtr(base64_encode($url), '+/', '-_'), '=');
+        return add_query_arg('fth_img', $encoded, home_url('/'));
+    }
+
+    /**
+     * Image proxy handler – serves Klook CDN images with spoofed Referer
+     * so the browser can display them without hotlink errors.
+     * Called on init priority 1, exits early if ?fth_img is not set.
+     */
+    public function handle_image_proxy() {
+        if (empty($_GET['fth_img'])) {
+            return;
+        }
+
+        // Decode base64url → original URL
+        $b64 = sanitize_text_field(wp_unslash($_GET['fth_img']));
+        // Re-pad and reverse URL-safe encoding
+        $pad = strlen($b64) % 4;
+        if ($pad) { $b64 .= str_repeat('=', 4 - $pad); }
+        $url = base64_decode(strtr($b64, '-_', '+/'), true);
+
+        if (!$url || !filter_var($url, FILTER_VALIDATE_URL)) {
+            status_header(400);
+            exit;
+        }
+
+        // Security: only proxy Klook CDN images
+        $host = parse_url($url, PHP_URL_HOST);
+        if (!$host || strpos($host, 'klook.com') === false) {
+            status_header(403);
+            exit;
+        }
+
+        // Disk cache
+        $upload_dir    = wp_upload_dir();
+        $cache_dir     = $upload_dir['basedir'] . '/fth-img-cache';
+        if (!is_dir($cache_dir)) {
+            wp_mkdir_p($cache_dir);
+            // Prevent directory listing
+            @file_put_contents($cache_dir . '/.htaccess', "Options -Indexes\n");
+        }
+        $cache_key      = md5($url);
+        $cache_img      = $cache_dir . '/' . $cache_key . '.img';
+        $cache_meta     = $cache_dir . '/' . $cache_key . '.meta';
+
+        // Serve from cache if available and recent (30 days)
+        if (file_exists($cache_img) && file_exists($cache_meta) && (time() - filemtime($cache_img) < 2592000)) {
+            $meta = json_decode(file_get_contents($cache_meta), true);
+            $ct   = isset($meta['ct']) ? $meta['ct'] : 'image/jpeg';
+            header('Content-Type: ' . $ct);
+            header('Cache-Control: public, max-age=2592000');
+            header('X-FTH-Cache: HIT');
+            readfile($cache_img);
+            exit;
+        }
+
+        // Fetch via cURL with Klook Referer header
+        $img_data = false;
+        $ct       = 'image/jpeg';
+        if (function_exists('curl_init')) {
+            $ch = curl_init($url);
+            curl_setopt_array($ch, array(
+                CURLOPT_RETURNTRANSFER => true,
+                CURLOPT_FOLLOWLOCATION => true,
+                CURLOPT_MAXREDIRS      => 5,
+                CURLOPT_TIMEOUT        => 20,
+                CURLOPT_SSL_VERIFYPEER => false,
+                CURLOPT_HTTPHEADER     => array(
+                    'Referer: https://www.klook.com/',
+                    'User-Agent: Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36',
+                    'Accept: image/avif,image/webp,image/apng,image/*,*/*;q=0.8',
+                    'Accept-Language: en-US,en;q=0.9',
+                ),
+            ));
+            $img_data  = curl_exec($ch);
+            $http_code = curl_getinfo($ch, CURLINFO_HTTP_CODE);
+            $raw_ct    = curl_getinfo($ch, CURLINFO_CONTENT_TYPE);
+            curl_close($ch);
+            if (!$img_data || $http_code !== 200) {
+                status_header(404);
+                exit;
+            }
+            if ($raw_ct) {
+                $ct = strtok($raw_ct, ';');
+                $ct = trim($ct);
+            }
+        } else {
+            // Fallback: wp_remote_get
+            $resp = wp_remote_get($url, array(
+                'timeout' => 20,
+                'headers' => array(
+                    'Referer'         => 'https://www.klook.com/',
+                    'User-Agent'      => 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36',
+                    'Accept'          => 'image/avif,image/webp,image/apng,image/*,*/*;q=0.8',
+                    'Accept-Language' => 'en-US,en;q=0.9',
+                ),
+            ));
+            if (is_wp_error($resp) || wp_remote_retrieve_response_code($resp) !== 200) {
+                status_header(404);
+                exit;
+            }
+            $img_data = wp_remote_retrieve_body($resp);
+            $raw_ct   = wp_remote_retrieve_header($resp, 'content-type');
+            if ($raw_ct) {
+                $ct = strtok($raw_ct, ';');
+                $ct = trim($ct);
+            }
+        }
+
+        // Validate content type
+        $allowed_ct = array('image/jpeg', 'image/jpg', 'image/png', 'image/gif', 'image/webp', 'image/avif');
+        if (!in_array($ct, $allowed_ct, true)) {
+            $ct = 'image/jpeg';
+        }
+
+        // Save to cache
+        @file_put_contents($cache_img, $img_data);
+        @file_put_contents($cache_meta, json_encode(array('ct' => $ct, 'url' => $url, 'ts' => time())));
+
+        header('Content-Type: ' . $ct);
+        header('Cache-Control: public, max-age=2592000');
+        header('X-FTH-Cache: MISS');
+        echo $img_data;
+        exit;
+    }
+
     /**
      * Generate Klook search deeplink for a city
      * @param string $city_name The city name
