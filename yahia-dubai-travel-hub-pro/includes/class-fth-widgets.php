@@ -175,32 +175,57 @@ class FTH_Widget_Categories extends WP_Widget {
     
     public function widget($args, $instance) {
         $title = apply_filters('widget_title', $instance['title']);
-        
+
         echo $args['before_widget'];
-        
+
         if ($title) {
             echo $args['before_title'] . esc_html($title) . $args['after_title'];
         }
-        
+
         $categories = FTH_Taxonomies::get_categories(array('hide_empty' => false));
-        
+
         if (!empty($categories)) {
             $primary_color = Flavor_Travel_Hub::get_primary_color();
+            // Inline CSS for animated emoji icons — injected once per widget render
+            static $fth_cat_widget_css_done = false;
+            if (!$fth_cat_widget_css_done) {
+                $fth_cat_widget_css_done = true;
+                echo '<style>
+@keyframes fth-emoji-wobble{0%,100%{transform:rotate(0) scale(1)}25%{transform:rotate(-14deg) scale(1.18)}75%{transform:rotate(14deg) scale(1.18)}}
+@keyframes fth-emoji-pop{0%{transform:scale(1)}50%{transform:scale(1.35)}100%{transform:scale(1)}}
+.fth-widget-categories-list{list-style:none;padding:0;margin:0}
+.fth-widget-categories-list li{margin-bottom:4px}
+.fth-widget-categories-list a{display:flex;align-items:center;gap:8px;padding:7px 10px;border-radius:10px;font-size:14px;font-weight:600;text-decoration:none;transition:background .2s,color .2s}
+.fth-widget-categories-list a:hover{background:rgba(41,137,192,.08)}
+.fth-widget-categories-list a:hover .fth-cat-emoji{animation:fth-emoji-wobble .5s ease-in-out}
+.fth-cat-emoji{display:inline-block;font-size:18px;line-height:1;width:24px;text-align:center;flex-shrink:0}
+.fth-cat-count{margin-left:auto;background:#f0f4f8;border-radius:999px;font-size:11px;color:#666;padding:1px 7px;font-weight:500}
+</style>';
+            }
             echo '<ul class="fth-widget-categories-list">';
             foreach ($categories as $category) {
-                $icon = get_term_meta($category->term_id, 'fth_icon', true);
-                echo '<li>';
-                echo '<a href="' . esc_url(get_term_link($category)) . '" style="color: ' . esc_attr($primary_color) . ';">';
-                if ($icon) {
-                    echo '<i class="fa ' . esc_attr($icon) . '"></i> ';
+                // Prefer emoji stored in term meta (fth_icon); fall back to taxonomy map
+                $icon_meta = get_term_meta($category->term_id, 'fth_icon', true);
+                // If it's a FontAwesome class (fa-*), ignore it and use the emoji map
+                if ($icon_meta && strpos($icon_meta, 'fa-') === false) {
+                    $emoji = $icon_meta; // stored as an emoji character directly
+                } else {
+                    $emoji = FTH_Taxonomies::get_emoji($category->slug, 'travel_category');
                 }
-                echo esc_html($category->name);
+                $count = (int) $category->count;
+                echo '<li>';
+                echo '<a href="' . esc_url(get_term_link($category)) . '" style="color:' . esc_attr($primary_color) . ';" title="' . esc_attr($category->name) . '">';
+                echo '<span class="fth-cat-emoji" aria-hidden="true">' . esc_html($emoji) . '</span>';
+                echo '<span>' . esc_html($category->name) . '</span>';
+                if ($count > 0) {
+                    echo '<span class="fth-cat-count">' . esc_html($count) . '</span>';
+                }
                 echo '</a>';
                 echo '</li>';
             }
             echo '</ul>';
         }
-        
+
         echo $args['after_widget'];
     }
     

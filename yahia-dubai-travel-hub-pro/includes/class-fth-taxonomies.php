@@ -280,6 +280,131 @@ class FTH_Taxonomies {
     }
     
     /**
+     * Return the best emoji for a given term slug + taxonomy.
+     * Used in widgets, cards and templates for visual category icons.
+     *
+     * @param string $slug     Term slug
+     * @param string $taxonomy Taxonomy name
+     * @return string  Single emoji character (UTF-8)
+     */
+    public static function get_emoji($slug, $taxonomy = 'travel_category') {
+        // Activity categories
+        $categories = array(
+            'attractions'          => '🏛️',
+            'theme-parks'          => '🎡',
+            'desert-safari'        => '🏜️',
+            'water-activities'     => '🌊',
+            'museums'              => '🎨',
+            'observation-decks'    => '🔭',
+            'boat-tours'           => '⛵',
+            'city-tours'           => '🚌',
+            'family-activities'    => '👨‍👩‍👧',
+            'cultural-experiences' => '🎭',
+            'outdoor-activities'   => '🏔️',
+            'transfers'            => '🚖',
+            'dining-experiences'   => '🍽️',
+            'adventure-tours'      => '🧗',
+            'shows-entertainment'  => '🎟️',
+            'day-trips'            => '🗺️',
+            'wellness-spa'         => '💆',
+            'nightlife'            => '🌙',
+            'shopping'             => '🛍️',
+            'photography-tours'    => '📸',
+            'sports'               => '⚽',
+            'cooking-classes'      => '👨‍🍳',
+            'wildlife'             => '🦁',
+            'skiing'               => '⛷️',
+            'cruises'              => '🛳️',
+        );
+        // Countries
+        $countries = array(
+            'united-arab-emirates' => '🇦🇪',
+            'uae'                  => '🇦🇪',
+            'dubai'                => '🇦🇪',
+            'france'               => '🇫🇷',
+            'united-kingdom'       => '🇬🇧',
+            'uk'                   => '🇬🇧',
+            'japan'                => '🇯🇵',
+            'united-states'        => '🇺🇸',
+            'usa'                  => '🇺🇸',
+            'italy'                => '🇮🇹',
+            'spain'                => '🇪🇸',
+            'germany'              => '🇩🇪',
+            'thailand'             => '🇹🇭',
+            'singapore'            => '🇸🇬',
+            'hong-kong'            => '🇭🇰',
+            'australia'            => '🇦🇺',
+            'india'                => '🇮🇳',
+            'egypt'                => '🇪🇬',
+            'turkey'               => '🇹🇷',
+            'greece'               => '🇬🇷',
+            'morocco'              => '🇲🇦',
+            'saudi-arabia'         => '🇸🇦',
+            'qatar'                => '🇶🇦',
+            'bahrain'              => '🇧🇭',
+            'kuwait'               => '🇰🇼',
+            'oman'                 => '🇴🇲',
+            'kenya'                => '🇰🇪',
+            'south-africa'         => '🇿🇦',
+            'brazil'               => '🇧🇷',
+            'mexico'               => '🇲🇽',
+            'indonesia'            => '🇮🇩',
+            'malaysia'             => '🇲🇾',
+            'vietnam'              => '🇻🇳',
+            'cambodia'             => '🇰🇭',
+            'nepal'                => '🇳🇵',
+            'maldives'             => '🇲🇻',
+            'switzerland'          => '🇨🇭',
+            'netherlands'          => '🇳🇱',
+            'portugal'             => '🇵🇹',
+            'canada'               => '🇨🇦',
+        );
+        // Cities (by slug — major travel hubs)
+        $cities = array(
+            'dubai'         => '🌆',
+            'paris'         => '🗼',
+            'london'        => '🎡',
+            'tokyo'         => '⛩️',
+            'new-york'      => '🗽',
+            'rome'          => '🏛️',
+            'barcelona'     => '🏖️',
+            'bali'          => '🌴',
+            'bangkok'       => '🛕',
+            'singapore'     => '🦁',
+            'sydney'        => '🦘',
+            'istanbul'      => '🕌',
+            'cairo'         => '🐪',
+            'marrakech'     => '🕌',
+            'abu-dhabi'     => '🕌',
+            'doha'          => '🏙️',
+            'muscat'        => '⛵',
+            'nairobi'       => '🐘',
+            'cape-town'     => '🌊',
+            'rio-de-janeiro'=> '⛰️',
+            'amsterdam'     => '🚲',
+            'vienna'        => '🎻',
+            'prague'        => '🏰',
+            'lisbon'        => '🚋',
+            'kyoto'         => '🌸',
+            'hong-kong'     => '🏙️',
+            'seoul'         => '🎎',
+            'mumbai'        => '🎬',
+            'agra'          => '🕌',
+            'phuket'        => '🏝️',
+            'santorini'     => '🏖️',
+        );
+
+        if ($taxonomy === 'travel_country') {
+            return isset($countries[$slug]) ? $countries[$slug] : '🌍';
+        }
+        if ($taxonomy === 'travel_city') {
+            return isset($cities[$slug]) ? $cities[$slug] : '📍';
+        }
+        // Default: category
+        return isset($categories[$slug]) ? $categories[$slug] : '✨';
+    }
+
+    /**
      * Get all types
      */
     public static function get_types($args = array()) {

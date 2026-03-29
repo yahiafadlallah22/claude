@@ -48,6 +48,7 @@ class FTH_Ajax {
         add_action('wp_ajax_fth_import_bulk_city', array(__CLASS__, 'import_bulk_city'));
         add_action('wp_ajax_fth_import_bulk_hotels', array(__CLASS__, 'import_bulk_hotels'));
         add_action('wp_ajax_fth_import_bulk_urls', array(__CLASS__, 'import_bulk_urls'));
+        add_action('wp_ajax_fth_import_bulk_country', array(__CLASS__, 'import_bulk_country'));
     }
     
 
@@ -173,6 +174,95 @@ private static function remote_get($url, $args = array()) {
 private static function build_affiliate_redirect($url) {
     $affiliate_id = Flavor_Travel_Hub::get_affiliate_id();
     return 'https://affiliate.klook.com/redirect?aid=' . rawurlencode($affiliate_id) . '&aff_adid=1238080&k_site=' . rawurlencode($url);
+}
+
+/**
+ * Fetch a Klook page HTML with multiple bypass strategies for Cloudflare.
+ *
+ * Tries (in order):
+ *  1. Direct cURL with Chrome 124 headers (cookie-persisted session)
+ *  2. Same URL without /en-US/ locale prefix
+ *  3. Google Web Cache — Googlebot is whitelisted by Cloudflare
+ *  4. Wayback Machine latest snapshot (archive.org)
+ *
+ * Returns the first response body that contains __NEXT_DATA__.
+ * If none have __NEXT_DATA__, returns whatever body was obtained (for og: tag parsing).
+ *
+ * @param  string $url   Klook URL (already normalised to /en-US/)
+ * @return array  { body: string, url: string, source: string }
+ */
+private static function fetch_klook_html($url) {
+    $result = array('body' => '', 'url' => $url, 'source' => 'none');
+    $best_body = ''; // best non-empty body even if no __NEXT_DATA__
+
+    // ── 1. Direct fetch ───────────────────────────────────────────────
+    $r = self::remote_get($url, array('timeout' => 60));
+    if (!is_wp_error($r)) {
+        $b = wp_remote_retrieve_body($r);
+        if (!empty($b)) {
+            if (strpos($b, '__NEXT_DATA__') !== false) {
+                return array('body' => $b, 'url' => $url, 'source' => 'direct');
+            }
+            $best_body = $b;
+        }
+    }
+
+    // ── 2. Without /en-US/ locale ────────────────────────────────────
+    if (strpos($url, '/en-US/') !== false) {
+        $url_nl = preg_replace('#/en-US/#', '/', $url);
+        $r2 = self::remote_get($url_nl, array('timeout' => 60));
+        if (!is_wp_error($r2)) {
+            $b2 = wp_remote_retrieve_body($r2);
+            if (!empty($b2)) {
+                if (strpos($b2, '__NEXT_DATA__') !== false) {
+                    return array('body' => $b2, 'url' => $url_nl, 'source' => 'direct_noloc');
+                }
+                if (empty($best_body)) $best_body = $b2;
+            }
+        }
+    }
+
+    // ── 3. Google Web Cache (Googlebot is CF-whitelisted) ────────────
+    $url_bare = preg_replace('#^https?://#', '', $url); // strip scheme
+    $gc_url   = 'https://webcache.googleusercontent.com/search?q=cache:' . rawurlencode($url_bare) . '&hl=en&gl=us';
+    $r3 = self::remote_get($gc_url, array(
+        'timeout' => 45,
+        'headers' => array('Referer' => 'https://www.google.com/'),
+    ));
+    if (!is_wp_error($r3)) {
+        $b3 = wp_remote_retrieve_body($r3);
+        $c3 = wp_remote_retrieve_response_code($r3);
+        if ($c3 === 200 && !empty($b3)) {
+            if (strpos($b3, '__NEXT_DATA__') !== false) {
+                return array('body' => $b3, 'url' => $url, 'source' => 'google_cache');
+            }
+            if (empty($best_body)) $best_body = $b3;
+        }
+    }
+
+    // ── 4. Wayback Machine latest snapshot ───────────────────────────
+    $wb_api = 'https://archive.org/wayback/available?url=' . rawurlencode($url_bare);
+    $r4 = self::remote_get($wb_api, array('timeout' => 20));
+    if (!is_wp_error($r4)) {
+        $wb_json = json_decode(wp_remote_retrieve_body($r4), true);
+        $snap    = isset($wb_json['archived_snapshots']['closest']['url']) ? $wb_json['archived_snapshots']['closest']['url'] : '';
+        if (!empty($snap)) {
+            $r5 = self::remote_get($snap, array('timeout' => 60));
+            if (!is_wp_error($r5)) {
+                $b5 = wp_remote_retrieve_body($r5);
+                if (!empty($b5)) {
+                    if (strpos($b5, '__NEXT_DATA__') !== false) {
+                        return array('body' => $b5, 'url' => $url, 'source' => 'wayback');
+                    }
+                    if (empty($best_body)) $best_body = $b5;
+                }
+            }
+        }
+    }
+
+    // Return best non-empty body (og: meta tags may still be present)
+    $result['body'] = $best_body;
+    return $result;
 }
 
 private static function array_find_first($data, $keys) {
@@ -556,6 +646,111 @@ private static function extract_hotel_links_from_html($body) {
 }
 
 /**
+ * Try to sideload an image from the FTH proxy disk cache.
+ * The proxy populates the cache whenever a visitor views a page with a proxied image.
+ * This avoids both Cloudflare blocks and HTTP loopback requests during AJAX imports.
+ *
+ * @param string $image_url  Original Klook CDN URL (the cache key is md5 of this URL)
+ * @param int    $post_id
+ * @return int|WP_Error  Attachment ID on success, WP_Error otherwise.
+ */
+private static function sideload_from_proxy_cache($image_url, $post_id) {
+    $upload_dir = wp_upload_dir();
+    $cache_dir  = $upload_dir['basedir'] . '/fth-img-cache';
+    $cache_key  = md5($image_url);
+    $cache_img  = $cache_dir . '/' . $cache_key . '.img';
+    $cache_meta = $cache_dir . '/' . $cache_key . '.meta';
+
+    if (!file_exists($cache_img) || !file_exists($cache_meta)) {
+        // Not yet cached — populate the cache by fetching inline (same logic as proxy handler)
+        // This way the next visit will hit the cache AND we get the image now.
+        if (!function_exists('curl_init')) {
+            return new WP_Error('no_cache', 'No proxy cache entry and cURL unavailable');
+        }
+        $ch = curl_init($image_url);
+        curl_setopt_array($ch, array(
+            CURLOPT_RETURNTRANSFER => true,
+            CURLOPT_FOLLOWLOCATION => true,
+            CURLOPT_MAXREDIRS      => 5,
+            CURLOPT_TIMEOUT        => 30,
+            CURLOPT_SSL_VERIFYPEER => false,
+            CURLOPT_HTTPHEADER     => array(
+                'Referer: https://www.klook.com/',
+                'User-Agent: Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36',
+                'Accept: image/avif,image/webp,image/apng,image/*,*/*;q=0.8',
+                'Accept-Language: en-US,en;q=0.9',
+                'sec-ch-ua: "Chromium";v="124", "Google Chrome";v="124"',
+                'sec-ch-ua-mobile: ?0',
+                'sec-fetch-dest: image',
+                'sec-fetch-mode: no-cors',
+                'sec-fetch-site: same-site',
+            ),
+        ));
+        $img_data  = curl_exec($ch);
+        $http_code = curl_getinfo($ch, CURLINFO_HTTP_CODE);
+        $raw_ct    = curl_getinfo($ch, CURLINFO_CONTENT_TYPE);
+        curl_close($ch);
+        if (!$img_data || $http_code !== 200 || ($raw_ct && strpos($raw_ct, 'text/html') !== false)) {
+            return new WP_Error('fetch_failed', 'Could not fetch image for cache: HTTP ' . $http_code);
+        }
+        $ct = $raw_ct ? strtok(trim($raw_ct), ';') : 'image/jpeg';
+        if (!is_dir($cache_dir)) {
+            wp_mkdir_p($cache_dir);
+            @file_put_contents($cache_dir . '/.htaccess', "Options -Indexes\n");
+        }
+        @file_put_contents($cache_img, $img_data);
+        @file_put_contents($cache_meta, json_encode(array('ct' => $ct, 'url' => $image_url, 'ts' => time())));
+    }
+
+    if (!file_exists($cache_img)) {
+        return new WP_Error('cache_write_failed', 'Could not write proxy cache');
+    }
+
+    // phpcs:ignore WordPress.WP.AlternativeFunctions.file_get_contents_file_get_contents
+    $body = file_get_contents($cache_img);
+    if (empty($body)) {
+        return new WP_Error('empty_cache', 'Empty proxy cache file');
+    }
+
+    $meta         = file_exists($cache_meta) ? json_decode(file_get_contents($cache_meta), true) : array();
+    $content_type = isset($meta['ct']) ? $meta['ct'] : 'image/jpeg';
+
+    if (!function_exists('wp_handle_sideload')) {
+        require_once ABSPATH . 'wp-admin/includes/media.php';
+        require_once ABSPATH . 'wp-admin/includes/file.php';
+        require_once ABSPATH . 'wp-admin/includes/image.php';
+    }
+    $tmpfname = wp_tempnam($image_url);
+    if (!$tmpfname) {
+        return new WP_Error('tmp_failed', 'Could not create temp file');
+    }
+    // phpcs:ignore WordPress.WP.AlternativeFunctions.file_system_operations_file_put_contents
+    file_put_contents($tmpfname, $body);
+
+    $ext_map  = array('image/jpeg'=>'jpg','image/jpg'=>'jpg','image/png'=>'png','image/gif'=>'gif','image/webp'=>'webp','image/avif'=>'avif');
+    $ext      = isset($ext_map[$content_type]) ? $ext_map[$content_type] : 'jpg';
+    $basename = sanitize_file_name(basename(strtok($image_url, '?')));
+    if (!preg_match('/\.(jpg|jpeg|png|gif|webp|avif)$/i', $basename)) {
+        $basename .= '.' . $ext;
+    }
+    $file     = array('name' => $basename, 'type' => $content_type, 'tmp_name' => $tmpfname, 'error' => 0, 'size' => strlen($body));
+    $sideload = wp_handle_sideload($file, array('test_form' => false));
+    if (isset($sideload['error'])) {
+        @unlink($tmpfname);
+        return new WP_Error('sideload_failed', $sideload['error']);
+    }
+    $att_id = wp_insert_attachment(
+        array('post_mime_type' => $sideload['type'], 'post_title' => sanitize_text_field(pathinfo($sideload['file'], PATHINFO_FILENAME)), 'post_content' => '', 'post_status' => 'inherit'),
+        $sideload['file'], $post_id
+    );
+    if (is_wp_error($att_id)) {
+        return $att_id;
+    }
+    wp_update_attachment_metadata($att_id, wp_generate_attachment_metadata($att_id, $sideload['file']));
+    return $att_id;
+}
+
+/**
  * Download a remote image and attach it to a post.
  * Uses a Klook Referer header so res.klook.com CDN allows the download.
  * Falls back to storing the URL as external meta if download fails.
@@ -594,6 +789,10 @@ private static function sideload_image_with_referer($image_url, $post_id, $refer
         }
         if ($raw_ct) {
             $content_type = strtok(trim($raw_ct), ';');
+        }
+        // If Cloudflare returned an HTML challenge page instead of an image, bail
+        if ($raw_ct && strpos($raw_ct, 'text/html') !== false) {
+            return new WP_Error('blocked', 'Cloudflare blocked image download: ' . $image_url);
         }
     } else {
         // Fallback: wp_remote_get
@@ -687,14 +886,30 @@ private static function import_post_images($post_id, $main_image, $gallery = arr
         // Always store the raw URL first so the card displays even if sideload fails
         update_post_meta($post_id, '_fth_external_image', esc_url_raw($main_image));
 
+        // Attempt 1: direct cURL download with Klook Referer (works for res.klook.com CDN)
         $attachment_id = self::sideload_image_with_referer($main_image, $post_id);
+
+        // Attempt 2: read from proxy disk cache (populated when visitors browse pages)
+        // or fetch inline with the same Chrome headers the proxy uses — no HTTP loopback.
+        if (is_wp_error($attachment_id)) {
+            $attachment_id = self::sideload_from_proxy_cache($main_image, $post_id);
+        }
+
+        // Attempt 3: HTTP proxy URL (last resort — requires WP loopback, may deadlock)
+        if (is_wp_error($attachment_id) && class_exists('Flavor_Travel_Hub')) {
+            $proxy_url = Flavor_Travel_Hub::fth_img_url($main_image);
+            if ($proxy_url && $proxy_url !== $main_image) {
+                $attachment_id = self::sideload_image_with_referer($proxy_url, $post_id, home_url());
+            }
+        }
+
         if (!is_wp_error($attachment_id) && $attachment_id) {
             $attachment_id = (int) $attachment_id;
             set_post_thumbnail($post_id, $attachment_id);
             update_post_meta($post_id, '_fth_external_image', wp_get_attachment_url($attachment_id));
             $all_attachment_ids[] = $attachment_id;
         }
-        // else: external URL is already saved above, no further action needed
+        // else: external URL is already saved above, templates display via proxy
     }
 
     $gallery_urls = array();
@@ -749,15 +964,25 @@ public static function import_bulk_city() {
         }
 
         $real_url = self::extract_real_klook_url($url);
+        // Normalise to /en-US/ to reduce locale-based Cloudflare variance
+        if (strpos($real_url, 'klook.com') !== false) {
+            $real_url = preg_replace('#(https?://(?:www\.)?klook\.com)/[a-z]{2}[-_][A-Za-z]{2,4}/#', '$1/en-US/', $real_url);
+            if (!preg_match('#klook\.com/en-US/#', $real_url)) {
+                $real_url = preg_replace('#(https?://(?:www\.)?klook\.com)/#', '$1/en-US/', $real_url);
+            }
+        }
         $candidate_urls = array($real_url);
+        // Strip locale for second try
+        $no_locale = preg_replace('#/en-US/#', '/', $real_url);
+        if ($no_locale !== $real_url) $candidate_urls[] = $no_locale;
         if (strpos($real_url, '/destination/') !== false) {
             $candidate_urls[] = trailingslashit($real_url) . '1-things-to-do/';
-            $candidate_urls[] = trailingslashit($real_url) . '1001-tours/';
+            $candidate_urls[] = trailingslashit($real_url) . '2-tours/';
         }
         $expanded = array();
         foreach (array_unique($candidate_urls) as $candidate_url) {
             $expanded[] = $candidate_url;
-            for ($page = 2; $page <= 5; $page++) {
+            for ($page = 2; $page <= 6; $page++) {
                 $expanded[] = add_query_arg('page', $page, $candidate_url);
             }
         }
@@ -765,31 +990,55 @@ public static function import_bulk_city() {
         $links = array();
         $notes = array();
         foreach (array_unique($expanded) as $candidate_url) {
-            $response = self::remote_get($candidate_url, array('timeout' => 60));
-            if (is_wp_error($response)) {
-                $notes[] = 'Could not fetch ' . $candidate_url . ': ' . $response->get_error_message();
-                continue;
+            $body = '';
+            $r = self::remote_get($candidate_url, array('timeout' => 60));
+            if (!is_wp_error($r)) {
+                $body = wp_remote_retrieve_body($r);
             }
-            $body = wp_remote_retrieve_body($response);
+            // If direct fetch was blocked (CF), try Google Cache for the listing page
+            if (empty($body) || (strpos($body, '__NEXT_DATA__') === false && strpos($body, '/activity/') === false)) {
+                $url_bare = preg_replace('#^https?://#', '', $candidate_url);
+                $gc_url   = 'https://webcache.googleusercontent.com/search?q=cache:' . rawurlencode($url_bare) . '&hl=en&gl=us';
+                $r_gc = self::remote_get($gc_url, array('timeout' => 45, 'headers' => array('Referer' => 'https://www.google.com/')));
+                if (!is_wp_error($r_gc)) {
+                    $gc_body = wp_remote_retrieve_body($r_gc);
+                    $gc_code = wp_remote_retrieve_response_code($r_gc);
+                    if ($gc_code === 200 && !empty($gc_body) && strpos($gc_body, '/activity/') !== false) {
+                        $body  = $gc_body;
+                        $notes[] = 'Used Google Cache for: ' . $candidate_url;
+                    }
+                }
+            }
             if (empty($body)) {
                 $notes[] = 'Empty response for ' . $candidate_url;
+                continue;
+            }
+            if (strpos($body, '__NEXT_DATA__') === false && strpos($body, '/activity/') === false) {
+                $notes[] = 'Blocked (no content) on ' . $candidate_url;
                 continue;
             }
             $found = self::extract_activity_links_from_html($body);
             if (!empty($found)) {
                 $links = array_merge($links, $found);
             }
+            if (count($links) >= $limit) break;
         }
         $links = array_values(array_unique($links));
         if (empty($links)) {
-            self::send_json_error_clean('No activity links found on this city page. ' . implode(' | ', array_slice($notes, 0, 3)));
+            self::send_json_error_clean('No activity links found. ' . implode(' | ', array_slice($notes, 0, 3)) . ' Tip: Try a URL like https://www.klook.com/en-US/destination/c78-dubai/');
         }
         $links = array_slice($links, 0, $limit);
 
         $imported = 0;
         $checked  = 0;
         $errors   = array();
+        $start    = time();
         foreach ($links as $activity_url) {
+            // Stop after 240 seconds to avoid PHP timeout
+            if ((time() - $start) > 240) {
+                $errors[] = 'Time limit reached – ' . (count($links) - $checked) . ' URLs not processed yet. Run again to continue.';
+                break;
+            }
             $checked++;
             $result = self::import_activity($activity_url, array(
                 'city'          => $city,
@@ -806,9 +1055,9 @@ public static function import_bulk_city() {
             }
         }
 
-        $message = 'Imported ' . $imported . ' activities out of ' . $checked . ' links checked.';
+        $message = 'Imported ' . $imported . ' activities out of ' . $checked . ' links found.';
         if (!empty($errors)) {
-            $message .= ' Some skipped: ' . implode(' | ', array_slice($errors, 0, 3));
+            $message .= ' Notes: ' . implode(' | ', array_slice($errors, 0, 3));
         }
         self::send_json_success_clean(array(
             'imported' => $imported,
@@ -910,29 +1159,13 @@ public static function import_bulk_city() {
             }
         }
 
-        // Fetch the real Klook page
-        $response = self::remote_get($url, array('timeout' => 60, 'redirection' => 5));
+        // Fetch with multi-strategy fallback: direct → no-locale → Google Cache → Wayback Machine
+        $fetch = self::fetch_klook_html($url);
+        $body  = $fetch['body'];
+        $url   = $fetch['url'];
 
-        if (is_wp_error($response)) {
-            return array('success' => false, 'message' => 'Failed to fetch URL: ' . $response->get_error_message());
-        }
-
-        $body = wp_remote_retrieve_body($response);
         if (empty($body)) {
-            return array('success' => false, 'message' => 'Empty response from Klook');
-        }
-
-        // If Cloudflare blocked us (no __NEXT_DATA__), retry without /en-US/ locale prefix
-        if (strpos($body, '__NEXT_DATA__') === false && strpos($url, '/en-US/') !== false) {
-            $url_no_locale = preg_replace('#/en-US/#', '/', $url);
-            $response2 = self::remote_get($url_no_locale, array('timeout' => 60, 'redirection' => 5));
-            if (!is_wp_error($response2)) {
-                $body2 = wp_remote_retrieve_body($response2);
-                if (!empty($body2) && strpos($body2, '__NEXT_DATA__') !== false) {
-                    $body = $body2;
-                    $url  = $url_no_locale;
-                }
-            }
+            return array('success' => false, 'message' => 'Failed to fetch activity page (all strategies failed): ' . $url);
         }
 
         // Parse data
@@ -1045,14 +1278,30 @@ public static function import_bulk_city() {
         // Taxonomies
         if (!empty($params['city'])) {
             wp_set_object_terms($post_id, intval($params['city']), 'travel_city');
+            // Auto-generate hero image for city if missing
+            $city_id = intval($params['city']);
+            if (!get_term_meta($city_id, 'fth_hero_image', true) && class_exists('Flavor_Travel_Hub')) {
+                $city_t = get_term($city_id, 'travel_city');
+                if ($city_t && !is_wp_error($city_t)) {
+                    Flavor_Travel_Hub::generate_taxonomy_image($city_t->name, $city_id, 'travel_city');
+                }
+            }
         }
         if (!empty($params['country'])) {
             wp_set_object_terms($post_id, intval($params['country']), 'travel_country');
+            // Auto-generate hero image for country if missing
+            $country_id = intval($params['country']);
+            if (!get_term_meta($country_id, 'fth_hero_image', true) && class_exists('Flavor_Travel_Hub')) {
+                $country_t = get_term($country_id, 'travel_country');
+                if ($country_t && !is_wp_error($country_t)) {
+                    Flavor_Travel_Hub::generate_taxonomy_image($country_t->name, $country_id, 'travel_country');
+                }
+            }
         }
         if (!empty($params['category'])) {
             wp_set_object_terms($post_id, intval($params['category']), 'travel_category');
         }
-        
+
         // Generate SEO (AIO SEO)
         self::generate_activity_seo_meta($post_id, get_post($post_id));
         if (class_exists('FTH_AIOSEO_Integration')) { FTH_AIOSEO_Integration::auto_fill_activity_seo($post_id, get_post($post_id)); }
@@ -1131,6 +1380,11 @@ public static function import_bulk_city() {
         }
         if (!empty($params['country'])) {
             update_term_meta($term_id, 'fth_parent_country', intval($params['country']));
+        }
+        // Store Klook destination URL and ID for country-wide import
+        update_term_meta($term_id, 'fth_klook_url', esc_url_raw($url));
+        if (preg_match('#/destination/c(\d+)-#i', $url, $dm)) {
+            update_term_meta($term_id, 'fth_klook_dest_id', $dm[1]);
         }
         
         // Auto-generate featured image if none exists yet
@@ -1240,12 +1494,25 @@ public static function import_bulk_city() {
             $listing_map = array();
             $notes = array();
             foreach (array_unique($candidate_urls) as $candidate_url) {
-                $response = self::remote_get($candidate_url, array('timeout' => 60));
-                if (is_wp_error($response)) {
-                    $notes[] = 'Failed ' . $candidate_url . ': ' . $response->get_error_message();
-                    continue;
+                $body = '';
+                $r = self::remote_get($candidate_url, array('timeout' => 60));
+                if (!is_wp_error($r)) {
+                    $body = wp_remote_retrieve_body($r);
                 }
-                $body = wp_remote_retrieve_body($response);
+                // If CF blocked, try Google Cache for the listing page
+                if (empty($body) || (strpos($body, '__NEXT_DATA__') === false && strpos($body, '/hotels/') === false)) {
+                    $url_bare = preg_replace('#^https?://#', '', $candidate_url);
+                    $gc_url   = 'https://webcache.googleusercontent.com/search?q=cache:' . rawurlencode($url_bare) . '&hl=en&gl=us';
+                    $r_gc = self::remote_get($gc_url, array('timeout' => 45, 'headers' => array('Referer' => 'https://www.google.com/')));
+                    if (!is_wp_error($r_gc)) {
+                        $gc_body = wp_remote_retrieve_body($r_gc);
+                        $gc_code = wp_remote_retrieve_response_code($r_gc);
+                        if ($gc_code === 200 && !empty($gc_body) && strpos($gc_body, '/hotels/') !== false) {
+                            $body  = $gc_body;
+                            $notes[] = 'Used Google Cache for: ' . $candidate_url;
+                        }
+                    }
+                }
                 if (!$body) {
                     $notes[] = 'Empty response for ' . $candidate_url;
                     continue;
@@ -1260,7 +1527,7 @@ public static function import_bulk_city() {
             $links = array_slice($links, 0, $limit);
             $imported = 0; $checked = 0; $errors = array(); $stopped_early = false;
             foreach ($links as $hotel_url) {
-                if ((time() - $start) > 45) {
+                if ((time() - $start) > 240) {
                     $stopped_early = true;
                     break;
                 }
@@ -1286,13 +1553,11 @@ public static function import_bulk_city() {
      * Import hotel from Klook
      */
     private static function import_hotel($url, $params, $original_deeplink = '') {
-        $response = self::remote_get($url, array('timeout'=>45,'redirection'=>5));
-        if (is_wp_error($response)) {
-            return array('success'=>false,'message'=>'Failed to fetch hotel URL: ' . $response->get_error_message());
-        }
-        $body = wp_remote_retrieve_body($response);
-        if (!$body) {
-            return array('success'=>false,'message'=>'Empty response from hotel page');
+        // Fetch with multi-strategy fallback: direct → no-locale → Google Cache → Wayback Machine
+        $fetch = self::fetch_klook_html($url);
+        $body  = $fetch['body'];
+        if (empty($body)) {
+            return array('success'=>false,'message'=>'Failed to fetch hotel page (all strategies failed): ' . $url);
         }
         $data = self::parse_klook_hotel_html($body, $url);
         $fallback = (!empty($params['listing_fallback']) && is_array($params['listing_fallback'])) ? $params['listing_fallback'] : array();
@@ -1354,9 +1619,27 @@ public static function import_bulk_city() {
         }
         // Save hotel_id with consistent key used by duplicate detection
         if (!empty($data['hotel_id'])) update_post_meta($post_id, '_fth_klook_hotel_id', $data['hotel_id']);
+        // Save hotel details fields
+        if (!empty($data['highlights'])) update_post_meta($post_id, '_fth_highlights', $data['highlights']);
+        if (!empty($data['inclusions'])) update_post_meta($post_id, '_fth_inclusions', $data['inclusions']);
+        if (!empty($data['faq']))        update_post_meta($post_id, '_fth_faq', $data['faq']);
         self::import_post_images($post_id, !empty($data['image']) ? $data['image'] : '', !empty($data['images']) && is_array($data['images']) ? $data['images'] : array());
-        if (!empty($params['city']))    wp_set_object_terms($post_id, intval($params['city']), 'travel_city');
-        if (!empty($params['country'])) wp_set_object_terms($post_id, intval($params['country']), 'travel_country');
+        if (!empty($params['city'])) {
+            wp_set_object_terms($post_id, intval($params['city']), 'travel_city');
+            $city_id = intval($params['city']);
+            if (!get_term_meta($city_id, 'fth_hero_image', true) && class_exists('Flavor_Travel_Hub')) {
+                $city_t = get_term($city_id, 'travel_city');
+                if ($city_t && !is_wp_error($city_t)) { Flavor_Travel_Hub::generate_taxonomy_image($city_t->name, $city_id, 'travel_city'); }
+            }
+        }
+        if (!empty($params['country'])) {
+            wp_set_object_terms($post_id, intval($params['country']), 'travel_country');
+            $country_id = intval($params['country']);
+            if (!get_term_meta($country_id, 'fth_hero_image', true) && class_exists('Flavor_Travel_Hub')) {
+                $country_t = get_term($country_id, 'travel_country');
+                if ($country_t && !is_wp_error($country_t)) { Flavor_Travel_Hub::generate_taxonomy_image($country_t->name, $country_id, 'travel_country'); }
+            }
+        }
         self::generate_hotel_seo_meta($post_id, get_post($post_id));
         if (class_exists('FTH_AIOSEO_Integration')) { FTH_AIOSEO_Integration::auto_fill_hotel_seo($post_id, get_post($post_id)); }
         update_option('fth_needs_flush', true);
@@ -1378,6 +1661,10 @@ public static function import_bulk_city() {
             'review_count'   => '',
             'address'        => '',
             'amenities'      => '',
+            'highlights'     => '',
+            'inclusions'     => '',
+            'exclusions'     => '',
+            'faq'            => '',
             'image'          => '',
             'images'         => array(),
             'affiliate_link' => self::build_affiliate_redirect($url),
@@ -1474,6 +1761,29 @@ public static function import_bulk_city() {
                     $data['images'] = array_values(array_unique(array_merge($data['images'], $clean)));
                     if (empty($data['image'])) {
                         $data['image'] = $data['images'][0];
+                    }
+                }
+                // Hotel highlights/facilities
+                if (empty($data['highlights'])) {
+                    $hl = self::bullet_lines(self::array_find_first($props, array('highlights','keyHighlights','propertyHighlights','hotelHighlights')), 10);
+                    if ($hl !== '') $data['highlights'] = $hl;
+                }
+                // Hotel inclusions (what's included in the rate)
+                if (empty($data['inclusions'])) {
+                    $inc = self::bullet_lines(self::array_find_first($props, array('inclusions','included','packageInclusions','rateInclusions')), 10);
+                    if ($inc !== '') $data['inclusions'] = $inc;
+                }
+                // Hotel FAQ
+                if (empty($data['faq'])) {
+                    $faq_candidate = self::array_find_first($props, array('faq','faqs','faqList','questionAnswer','qAndA','hotelFaq'));
+                    if (!empty($faq_candidate) && is_array($faq_candidate)) {
+                        $faq_lines = array();
+                        foreach (array_slice($faq_candidate, 0, 6) as $item) {
+                            $q = self::normalize_text_block(is_array($item) ? self::array_find_first($item, array('question','title','q')) : '');
+                            $a = self::normalize_text_block(is_array($item) ? self::array_find_first($item, array('answer','content','a')) : '');
+                            if ($q && $a) $faq_lines[] = 'Q: ' . $q . "\nA: " . $a;
+                        }
+                        if ($faq_lines) $data['faq'] = implode("\n\n", $faq_lines);
                     }
                 }
             }
@@ -2683,5 +2993,120 @@ if (preg_match('/<script[^>]*id=["\']__NEXT_DATA__["\'][^>]*>(.*?)<\/script>/si'
         }
         
         wp_send_json_success(array('updated' => $updated));
+    }
+
+    /**
+     * Bulk import activities AND hotels for an entire country.
+     * Iterates through all cities that belong to the chosen country term,
+     * discovers activity/hotel links for each city and imports them.
+     */
+    public static function import_bulk_country() {
+        self::begin_import_request();
+        try {
+            if (!check_ajax_referer('fth_import_publish', 'nonce', false)) {
+                self::send_json_error_clean('Security check failed');
+            }
+            if (!current_user_can('edit_posts')) {
+                self::send_json_error_clean('Unauthorized');
+            }
+            $country_id  = isset($_POST['country']) ? intval($_POST['country']) : 0;
+            $import_type = isset($_POST['import_type']) ? sanitize_text_field($_POST['import_type']) : 'activities'; // 'activities' or 'hotels'
+            $limit       = isset($_POST['limit']) ? max(1, min(300, intval($_POST['limit']))) : 60;
+            $category    = isset($_POST['category']) ? intval($_POST['category']) : 0;
+
+            if (!$country_id) {
+                self::send_json_error_clean('Please select a country');
+            }
+            $country_term = get_term($country_id, 'travel_country');
+            if (!$country_term || is_wp_error($country_term)) {
+                self::send_json_error_clean('Country not found');
+            }
+
+            // Get all cities for this country
+            $city_terms = get_terms(array(
+                'taxonomy'   => 'travel_city',
+                'hide_empty' => false,
+                'meta_query' => array(array('key' => 'fth_parent_country', 'value' => $country_id)),
+            ));
+            if (empty($city_terms) || is_wp_error($city_terms)) {
+                self::send_json_error_clean('No cities found for this country. Import at least one city first.');
+            }
+
+            $total_imported = 0;
+            $total_checked  = 0;
+            $all_errors     = array();
+            $start          = time();
+
+            foreach ($city_terms as $city_term) {
+                if ((time() - $start) > 240) {
+                    $all_errors[] = 'Time limit reached – some cities not processed. Run again to continue.';
+                    break;
+                }
+                // Build the destination URL for this city (try slug-based discovery)
+                $city_slug = $city_term->slug;
+                $city_id   = $city_term->term_id;
+                // Klook city destination ID stored in term meta (set during city import)
+                $klook_dest_id = get_term_meta($city_id, 'fth_klook_dest_id', true);
+                if ($klook_dest_id) {
+                    $dest_url = 'https://www.klook.com/en-US/destination/c' . $klook_dest_id . '-' . $city_slug . '/';
+                } else {
+                    // Attempt to find the destination URL stored during city import
+                    $dest_url = get_term_meta($city_id, 'fth_klook_url', true);
+                }
+                if (empty($dest_url)) {
+                    $all_errors[] = 'No Klook URL for city: ' . $city_term->name;
+                    continue;
+                }
+
+                // Fetch activity/hotel links from this city destination page
+                $links = array();
+                $try_urls = array($dest_url);
+                if ($import_type === 'hotels') {
+                    $try_urls[] = trailingslashit($dest_url) . '3-hotel/';
+                    $try_urls[] = preg_replace('#/$#', '', $dest_url) . '/3-hotel/';
+                }
+                foreach ($try_urls as $try_url) {
+                    for ($page = 1; $page <= 4; $page++) {
+                        $page_url = ($page === 1) ? $try_url : add_query_arg('page', $page, $try_url);
+                        $resp = self::remote_get($page_url, array('timeout' => 30));
+                        if (is_wp_error($resp)) continue;
+                        $body = wp_remote_retrieve_body($resp);
+                        if (empty($body) || (strpos($body, '__NEXT_DATA__') === false && strpos($body, '/activity/') === false && strpos($body, '/hotels/') === false)) continue;
+                        $found = ($import_type === 'hotels')
+                            ? self::extract_hotel_links_from_html($body)
+                            : self::extract_activity_links_from_html($body);
+                        if (!empty($found)) {
+                            $links = array_merge($links, $found);
+                        }
+                        if (count($links) >= $limit) break 2;
+                    }
+                }
+                $links = array_values(array_unique($links));
+                if (empty($links)) continue;
+                $links = array_slice($links, 0, $limit);
+
+                foreach ($links as $item_url) {
+                    if ((time() - $start) > 240) break 2;
+                    $total_checked++;
+                    $params = array('city'=>$city_id,'country'=>$country_id,'category'=>$category,'publish'=>1,'is_featured'=>0,'is_bestseller'=>0);
+                    $result = ($import_type === 'hotels')
+                        ? self::import_hotel($item_url, $params, self::build_affiliate_redirect($item_url))
+                        : self::import_activity($item_url, $params, self::build_affiliate_redirect($item_url));
+                    if (!empty($result['success'])) {
+                        $total_imported++;
+                    } else {
+                        $all_errors[] = !empty($result['message']) ? $result['message'] : 'Unknown error';
+                    }
+                }
+            }
+
+            $message = 'Country import done: ' . $total_imported . ' ' . $import_type . ' imported out of ' . $total_checked . ' found.';
+            if (!empty($all_errors)) {
+                $message .= ' Notes: ' . implode(' | ', array_slice($all_errors, 0, 5));
+            }
+            self::send_json_success_clean(array('imported'=>$total_imported,'checked'=>$total_checked,'message'=>$message));
+        } catch (Throwable $e) {
+            self::send_json_error_clean('Country import failed: ' . $e->getMessage());
+        }
     }
 }

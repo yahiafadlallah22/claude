@@ -1322,7 +1322,25 @@ body.page-template-default.page .right_sidebar {
     text-overflow: ellipsis;
 }
 .fth-lux-badge-deal {
-    background: #e53e3e;
+    background: linear-gradient(135deg, #e53e3e, #ff6b35);
+    box-shadow: 0 2px 8px rgba(229,62,62,.45);
+}
+@keyframes fth-deal-pulse {
+    0%,100% { transform: scale(1); box-shadow: 0 2px 8px rgba(229,62,62,.45); }
+    50%      { transform: scale(1.07); box-shadow: 0 4px 14px rgba(229,62,62,.7); }
+}
+.fth-deal-pulse {
+    animation: fth-deal-pulse 2s ease-in-out infinite;
+}
+/* "Prix négocié Yahia" savings strip on cards */
+.fth-yahia-deal-strip {
+    font-size: 11px;
+    font-weight: 700;
+    color: #92400e;
+    background: linear-gradient(90deg, #fef3c7, #fde68a);
+    border-radius: 6px;
+    padding: 4px 10px;
+    display: inline-block;
 }
 .fth-lux-rating-pill {
     position: absolute;

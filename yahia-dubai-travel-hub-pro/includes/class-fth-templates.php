@@ -265,16 +265,18 @@ class FTH_Templates {
         $primary_color   = Flavor_Travel_Hub::get_primary_color();
         $has_discount    = $original_price && (float) $original_price > (float) $price && (float) $price > 0;
         $discount_pct    = $has_discount ? round((1 - (float)$price / (float)$original_price) * 100) : 0;
+        $saving          = $has_discount ? round((float)$original_price - (float)$price) : 0;
         $link            = $affiliate_link ?: $permalink;
+        $cat_emoji       = !empty($categories) ? FTH_Taxonomies::get_emoji($categories[0]->slug, 'travel_category') : '✨';
         ob_start(); ?>
         <article class="fth-lux-card" itemscope itemtype="https://schema.org/TouristAttraction">
             <a href="<?php echo esc_url($permalink); ?>" class="fth-lux-img-wrap" aria-label="<?php echo esc_attr($title); ?>">
                 <span class="fth-lux-img" style="background-image:url('<?php echo esc_url($image_url); ?>');"></span>
                 <span class="fth-lux-img-overlay"></span>
                 <?php if ($has_discount && $discount_pct >= 5): ?>
-                <span class="fth-lux-badge fth-lux-badge-deal">-<?php echo (int)$discount_pct; ?>%</span>
+                <span class="fth-lux-badge fth-lux-badge-deal fth-deal-pulse">🏷️ -<?php echo (int)$discount_pct; ?>%</span>
                 <?php elseif ($args['show_category'] && $category_name): ?>
-                <span class="fth-lux-badge"><?php echo esc_html($category_name); ?></span>
+                <span class="fth-lux-badge"><?php echo esc_html($cat_emoji . ' ' . $category_name); ?></span>
                 <?php endif; ?>
                 <?php if ($args['show_rating'] && $rating): ?>
                 <span class="fth-lux-rating-pill">
@@ -292,6 +294,9 @@ class FTH_Templates {
                 </div>
                 <?php endif; ?>
                 <h3 class="fth-lux-title" itemprop="name"><a href="<?php echo esc_url($permalink); ?>"><?php echo esc_html($title); ?></a></h3>
+                <?php if ($has_discount && $discount_pct >= 5): ?>
+                <div class="fth-yahia-deal-strip">🤝 Prix négocié · Économisez <?php echo esc_html($symbol . $saving); ?></div>
+                <?php endif; ?>
                 <div class="fth-lux-footer">
                     <div class="fth-lux-price">
                         <?php if ($has_discount): ?>
@@ -380,6 +385,7 @@ class FTH_Templates {
         $image_url      = Flavor_Travel_Hub::fth_img_url($image_url);
         $has_discount   = $original_price && (float) $original_price > (float) $price && (float) $price > 0;
         $discount_pct   = $has_discount ? round((1 - (float)$price / (float)$original_price) * 100) : 0;
+        $h_saving       = $has_discount ? round((float)$original_price - (float)$price) : 0;
         $link           = $affiliate_link ?: $permalink;
         ob_start(); ?>
         <article class="fth-lux-card fth-lux-card-hotel" itemscope itemtype="https://schema.org/LodgingBusiness">
@@ -387,7 +393,7 @@ class FTH_Templates {
                 <span class="fth-lux-img" style="background-image:url('<?php echo esc_url($image_url); ?>');"></span>
                 <span class="fth-lux-img-overlay"></span>
                 <?php if ($has_discount && $discount_pct >= 5): ?>
-                <span class="fth-lux-badge fth-lux-badge-deal">-<?php echo (int)$discount_pct; ?>%</span>
+                <span class="fth-lux-badge fth-lux-badge-deal fth-deal-pulse">🏷️ -<?php echo (int)$discount_pct; ?>%</span>
                 <?php else: ?>
                 <span class="fth-lux-badge">🏨 Hotel</span>
                 <?php endif; ?>
@@ -410,6 +416,9 @@ class FTH_Templates {
                 </div>
                 <?php endif; ?>
                 <h3 class="fth-lux-title" itemprop="name"><a href="<?php echo esc_url($permalink); ?>"><?php echo esc_html($title); ?></a></h3>
+                <?php if ($has_discount && $discount_pct >= 5): ?>
+                <div class="fth-yahia-deal-strip">🤝 Prix négocié · Économisez <?php echo esc_html($symbol . $h_saving); ?></div>
+                <?php endif; ?>
                 <div class="fth-lux-footer">
                     <div class="fth-lux-price">
                         <?php if ($has_discount): ?>

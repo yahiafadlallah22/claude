@@ -901,9 +901,48 @@ class FTH_Admin {
                     <div id="fth_batch_import_status" style="margin-top: 15px; padding: 12px; border-radius: 6px; display: none;"></div>
                 </div>
 
+                <!-- Country-wide bulk import -->
+                <div class="fth-import-panel" style="background: linear-gradient(135deg, #b45309 0%, #92400e 100%); color: #fff; padding: 30px; border-radius: 12px; margin-bottom: 30px;">
+                    <h2 style="margin: 0 0 10px; font-size: 24px;">7️⃣ Import entire country — activities OR hotels</h2>
+                    <p style="margin: 0 0 20px; opacity: 0.9;">Iterates through all cities in a country and fetches every activity or hotel it can find. Cities must be imported first so their Klook destination URLs are stored.</p>
+                    <div style="display: grid; grid-template-columns: 1fr 1fr 1fr 140px; gap: 15px; margin-bottom: 20px;">
+                        <div>
+                            <label style="display: block; margin-bottom: 8px; font-weight: 600;">Country</label>
+                            <select id="fth_country_import_country" style="width: 100%; padding: 10px; border: none; border-radius: 6px;">
+                                <option value="">Select Country</option>
+                                <?php foreach ($countries as $country): ?>
+                                    <option value="<?php echo esc_attr($country->term_id); ?>"><?php echo esc_html($country->name); ?></option>
+                                <?php endforeach; ?>
+                            </select>
+                        </div>
+                        <div>
+                            <label style="display: block; margin-bottom: 8px; font-weight: 600;">Import type</label>
+                            <select id="fth_country_import_type" style="width: 100%; padding: 10px; border: none; border-radius: 6px;">
+                                <option value="activities">Activities</option>
+                                <option value="hotels">Hotels</option>
+                            </select>
+                        </div>
+                        <div>
+                            <label style="display: block; margin-bottom: 8px; font-weight: 600;">Category (activities)</label>
+                            <select id="fth_country_import_category" style="width: 100%; padding: 10px; border: none; border-radius: 6px;">
+                                <option value="">Select Category</option>
+                                <?php foreach ($categories as $cat): ?>
+                                    <option value="<?php echo esc_attr($cat->term_id); ?>"><?php echo esc_html($cat->name); ?></option>
+                                <?php endforeach; ?>
+                            </select>
+                        </div>
+                        <div>
+                            <label style="display: block; margin-bottom: 8px; font-weight: 600;">Limit/city</label>
+                            <input type="number" id="fth_country_import_limit" value="30" min="5" max="150" style="width: 100%; padding: 10px; border: none; border-radius: 6px;">
+                        </div>
+                    </div>
+                    <button type="button" id="fth_country_import_btn" class="button" style="background: #fff; color: #92400e; border: none; padding: 12px 30px; font-size: 16px; font-weight: 700; border-radius: 6px; cursor: pointer;">⚡ Import Entire Country</button>
+                    <div id="fth_country_import_status" style="margin-top: 15px; padding: 12px; border-radius: 6px; display: none;"></div>
+                </div>
+
                 <!-- Notes -->
                 <div class="fth-import-panel" style="background: #f8f9fa; padding: 25px; border-radius: 12px; border: 1px solid #e9ecef;">
-                    <h3 style="margin: 0 0 15px;">7️⃣ After importing — regenerate hubs</h3>
+                    <h3 style="margin: 0 0 15px;">8️⃣ After importing — regenerate hubs</h3>
                     <ul style="margin: 0; padding-left: 20px; color: #666;">
                         <li>Find activities on Klook.com, copy the URL, paste above — all details, images and SEO are auto-filled.</li>
                         <li>Your affiliate ID (<strong><?php echo esc_html($affiliate_id); ?></strong>) is added automatically to every booking link.</li>
@@ -1055,6 +1094,33 @@ $('#fth_bulk_import_btn').on('click', function() {
                         $status.css('background','rgba(244,67,54,0.3)').text('❌ ' + (response.data ? response.data.message : 'Bulk import failed')).show();
                     }
                 }).fail(function(xhr){ var msg = 'Network error'; if (xhr && xhr.responseJSON && xhr.responseJSON.data && xhr.responseJSON.data.message) { msg = xhr.responseJSON.data.message; } else if (xhr && xhr.responseText) { msg = xhr.responseText.substring(0,240); } $status.css('background','rgba(244,67,54,0.3)').text('❌ ' + msg).show(); }).always(function(){ $btn.prop('disabled', false).text('⚡ Fetch All Hotels'); });
+            });
+
+            // Country-wide import
+            $('#fth_country_import_btn').on('click', function() {
+                var country = $('#fth_country_import_country').val();
+                var $btn = $(this);
+                var $status = $('#fth_country_import_status');
+                if (!country) {
+                    $status.css('background','rgba(244,67,54,0.3)').text('Please select a country').show();
+                    return;
+                }
+                $btn.prop('disabled', true).text('Importing...');
+                $status.css('background','rgba(255,255,255,0.2)').text('Iterating through cities... this can take several minutes.').show();
+                $.post(ajaxurl, {
+                    action: 'fth_import_bulk_country',
+                    country: country,
+                    import_type: $('#fth_country_import_type').val(),
+                    category: $('#fth_country_import_category').val(),
+                    limit: $('#fth_country_import_limit').val(),
+                    nonce: '<?php echo wp_create_nonce('fth_import_publish'); ?>'
+                }, function(response) {
+                    if (response.success) {
+                        $status.css('background','rgba(76,175,80,0.3)').text('✅ ' + response.data.message).show();
+                    } else {
+                        $status.css('background','rgba(244,67,54,0.3)').text('❌ ' + (response.data ? response.data.message : 'Import failed')).show();
+                    }
+                }).fail(function(xhr){ var msg = 'Network error'; if (xhr && xhr.responseJSON && xhr.responseJSON.data && xhr.responseJSON.data.message) { msg = xhr.responseJSON.data.message; } else if (xhr && xhr.responseText) { msg = xhr.responseText.substring(0,240); } $status.css('background','rgba(244,67,54,0.3)').text('❌ ' + msg).show(); }).always(function(){ $btn.prop('disabled', false).text('⚡ Import Entire Country'); });
             });
 
             // Import City
