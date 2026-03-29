@@ -1,0 +1,269 @@
+/**
+ * Flavor Travel Hub - Admin Styles
+ */
+
+/* Admin Wrap */
+.fth-admin-wrap {
+    max-width: 1400px;
+}
+
+.fth-admin-title {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+    font-size: 28px;
+    margin-bottom: 24px;
+}
+
+.fth-admin-title .dashicons {
+    font-size: 32px;
+    width: 32px;
+    height: 32px;
+}
+
+/* Stats Grid */
+.fth-admin-stats {
+    display: grid;
+    grid-template-columns: repeat(auto-fill, minmax(200px, 1fr));
+    gap: 16px;
+    margin-bottom: 32px;
+}
+
+.fth-stat-card {
+    background: #fff;
+    border: 1px solid #ddd;
+    border-radius: 8px;
+    padding: 20px;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    text-align: center;
+    position: relative;
+    transition: all 0.2s ease;
+}
+
+.fth-stat-card:hover {
+    box-shadow: 0 4px 12px rgba(0,0,0,0.1);
+    transform: translateY(-2px);
+}
+
+.fth-stat-icon {
+    width: 50px;
+    height: 50px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    border-radius: 50%;
+    margin-bottom: 12px;
+}
+
+.fth-stat-icon .dashicons {
+    font-size: 24px;
+    width: 24px;
+    height: 24px;
+}
+
+.fth-stat-content {
+    display: flex;
+    flex-direction: column;
+}
+
+.fth-stat-number {
+    font-size: 32px;
+    font-weight: 700;
+    color: #1d2327;
+    line-height: 1;
+}
+
+.fth-stat-label {
+    font-size: 13px;
+    color: #666;
+    margin-top: 4px;
+}
+
+.fth-stat-link {
+    display: block;
+    margin-top: 12px;
+    font-size: 12px;
+    color: #2271b1;
+    text-decoration: none;
+}
+
+.fth-stat-link:hover {
+    text-decoration: underline;
+}
+
+/* Admin Grid */
+.fth-admin-grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fill, minmax(350px, 1fr));
+    gap: 24px;
+}
+
+.fth-admin-panel {
+    background: #fff;
+    border: 1px solid #ddd;
+    border-radius: 8px;
+    padding: 24px;
+}
+
+.fth-admin-panel h2 {
+    font-size: 16px;
+    font-weight: 600;
+    margin: 0 0 16px;
+    padding-bottom: 12px;
+    border-bottom: 1px solid #eee;
+}
+
+/* Quick Actions */
+.fth-quick-actions {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 10px;
+}
+
+.fth-quick-actions .button {
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+}
+
+.fth-quick-actions .button .dashicons {
+    font-size: 16px;
+    width: 16px;
+    height: 16px;
+}
+
+/* Recent List */
+.fth-recent-list {
+    list-style: none;
+    margin: 0;
+    padding: 0;
+}
+
+.fth-recent-list li {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    padding: 10px 0;
+    border-bottom: 1px solid #f0f0f0;
+}
+
+.fth-recent-list li:last-child {
+    border-bottom: none;
+}
+
+.fth-recent-list a {
+    text-decoration: none;
+    color: #2271b1;
+}
+
+.fth-recent-list a:hover {
+    text-decoration: underline;
+}
+
+.fth-recent-date {
+    font-size: 12px;
+    color: #999;
+}
+
+/* Shortcode List */
+.fth-shortcode-list {
+    display: flex;
+    flex-direction: column;
+    gap: 12px;
+}
+
+.fth-shortcode-item {
+    display: flex;
+    flex-direction: column;
+    gap: 4px;
+}
+
+.fth-shortcode-item code {
+    display: inline-block;
+    background: #f5f5f5;
+    padding: 6px 10px;
+    border-radius: 4px;
+    font-size: 13px;
+    color: #d63384;
+}
+
+.fth-shortcode-item span {
+    font-size: 12px;
+    color: #666;
+}
+
+/* Links List */
+.fth-links-list {
+    list-style: none;
+    margin: 0;
+    padding: 0;
+}
+
+.fth-links-list li {
+    padding: 8px 0;
+    border-bottom: 1px solid #f0f0f0;
+}
+
+.fth-links-list li:last-child {
+    border-bottom: none;
+}
+
+.fth-links-list strong {
+    display: block;
+    font-size: 12px;
+    color: #666;
+    margin-bottom: 4px;
+}
+
+.fth-links-list a {
+    font-size: 13px;
+}
+
+/* Settings Form */
+.fth-settings-form {
+    max-width: 800px;
+}
+
+.fth-settings-section {
+    background: #fff;
+    border: 1px solid #ddd;
+    border-radius: 8px;
+    padding: 24px;
+    margin-bottom: 24px;
+}
+
+.fth-settings-section h2 {
+    font-size: 16px;
+    font-weight: 600;
+    margin: 0 0 16px;
+    padding-bottom: 12px;
+    border-bottom: 1px solid #eee;
+}
+
+.fth-settings-section .form-table th {
+    width: 200px;
+    padding-left: 0;
+}
+
+/* Preview Box */
+.fth-preview-box {
+    margin-top: 20px;
+}
+
+/* Activity Card Preview in Admin */
+.fth-preview-box .fth-activity-card {
+    box-shadow: 0 2px 8px rgba(0,0,0,0.1);
+}
+
+/* Responsive */
+@media (max-width: 782px) {
+    .fth-admin-stats {
+        grid-template-columns: repeat(2, 1fr);
+    }
+    
+    .fth-admin-grid {
+        grid-template-columns: 1fr;
+    }
+}
