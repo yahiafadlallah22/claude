@@ -71,13 +71,12 @@ body.tax-travel_city .widget-area,body.tax-travel_city .sidebar,body.tax-travel_
       <div class="klc-chips">
         <span class="klc-chip">📍 <?php echo esc_html($term->name); ?></span>
         <?php if ($country_name): ?><span class="klc-chip"><?php echo esc_html($country_name); ?></span><?php endif; ?>
-        <?php if ($act_count): ?><span class="klc-chip"><?php echo $act_count; ?> activité<?php echo $act_count > 1 ? 's' : ''; ?></span><?php endif; ?>
-        <?php if ($hot_count): ?><span class="klc-chip"><?php echo $hot_count; ?> hôtel<?php echo $hot_count > 1 ? 's' : ''; ?></span><?php endif; ?>
+        <?php if ($act_count): ?><span class="klc-chip"><?php echo $act_count; ?> activit<?php echo $act_count > 1 ? 'ies' : 'y'; ?></span><?php endif; ?>
+        <?php if ($hot_count): ?><span class="klc-chip"><?php echo $hot_count; ?> hotel<?php echo $hot_count > 1 ? 's' : ''; ?></span><?php endif; ?>
       </div>
       <h1 class="klc-title">Explore <?php echo esc_html($term->name); ?></h1>
       <p class="klc-subtitle">Activities, tours, attractions and hotels in <?php echo esc_html($term->name); ?>. Exclusive deals by Yahia Fadlallah.</p>
-      <form class="klc-search" method="get" action="<?php echo esc_url(FTH_Templates::get_hub_url('things-to-do')); ?>">
-        <input type="hidden" name="fth_mode" value="activities">
+      <form class="klc-search" method="get" action="<?php echo esc_url(get_term_link($term)); ?>">
         <input type="hidden" name="fth_city" value="<?php echo esc_attr($term->slug); ?>">
         <input type="text" name="fth_search" placeholder="🔍 Search in <?php echo esc_attr($term->name); ?>" value="<?php echo esc_attr($sq); ?>">
         <select name="fth_category">

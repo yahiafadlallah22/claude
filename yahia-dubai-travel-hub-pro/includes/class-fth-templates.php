@@ -137,6 +137,10 @@ class FTH_Templates {
         if (is_admin()) {
             return;
         }
+        // Don't redirect when already on a taxonomy/term page — it handles its own search
+        if (is_tax('travel_city') || is_tax('travel_country') || is_tax('travel_category')) {
+            return;
+        }
         $has_travel_query = isset($_GET['fth_search']) || isset($_GET['fth_city']) || isset($_GET['fth_country']) || isset($_GET['fth_category']);
         if (!$has_travel_query) {
             return;

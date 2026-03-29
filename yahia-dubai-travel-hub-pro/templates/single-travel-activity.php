@@ -287,8 +287,9 @@ body.single-travel_activity .widget-area,body.single-travel_activity .sidebar,bo
         <a class="kl-cta" href="<?php echo esc_url($affiliate_link ?: '#'); ?>" target="_blank" rel="noopener noreferrer">
           🎟 <?php echo esc_html($cta_text); ?>
         </a>
-        <div style="background:#fff7ed;border:1px solid #fed7aa;border-radius:10px;padding:12px 14px;font-size:13px;color:#92400e;font-weight:700;text-align:center;margin-bottom:16px;">
-          🤝 <?php echo esc_html($promo_text); ?>
+        <div style="background:#fff7ed;border:1px solid #fed7aa;border-radius:10px;padding:14px;text-align:center;margin-bottom:16px;">
+          <img src="https://yahiadubai.com/wp-content/uploads/2026/03/New-Project-4.png" alt="Yahia Fadlallah" style="max-width:120px;height:auto;display:block;margin:0 auto 8px;border-radius:8px;">
+          <div style="font-size:13px;color:#92400e;font-weight:700;">🤝 <?php echo esc_html($promo_text); ?></div>
         </div>
         <div class="kl-trust">
           <div class="kl-trust-item"><span class="kl-trust-icon">🎟️</span><span>Tickets &amp; availability visible in real time</span></div>

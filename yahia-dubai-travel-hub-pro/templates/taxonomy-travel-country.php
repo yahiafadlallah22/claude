@@ -52,8 +52,7 @@ body.tax-travel_country .widget-area,body.tax-travel_country .sidebar,body.tax-t
     <div class="flag"><?php echo esc_html($flag); ?></div>
     <h1><?php echo esc_html($term->name); ?></h1>
     <p>Explore cities, activities and hotels in <?php echo esc_html($term->name); ?>.</p>
-    <form class="klco-search" method="get" action="<?php echo esc_url(FTH_Templates::get_hub_url('things-to-do')); ?>">
-      <input type="hidden" name="fth_mode" value="activities">
+    <form class="klco-search" method="get" action="<?php echo esc_url(get_term_link($term)); ?>">
       <input type="hidden" name="fth_country" value="<?php echo esc_attr($term->slug); ?>">
       <input type="text" name="fth_search" placeholder="🔍 Search in <?php echo esc_attr($term->name); ?>" value="<?php echo esc_attr($sq); ?>">
       <button type="submit">Search</button>
