@@ -79,33 +79,38 @@ private static function get_scraperapi_key() {
 }
 
 private static function remote_get($url, $args = array()) {
-    // Rotate user agents to reduce blocking by Klook
     static $ua_index = 0;
     $user_agents = array(
         'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36',
-        'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/123.0.0.0 Safari/537.36',
+        'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36',
         'Mozilla/5.0 (Windows NT 10.0; Win64; x64; rv:125.0) Gecko/20100101 Firefox/125.0',
-        'Mozilla/5.0 (Macintosh; Intel Mac OS X 14_4) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/17.4 Safari/605.1.15',
+        'Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36',
     );
-    $ua = $user_agents[$ua_index % count($user_agents)];
+    $ua      = $user_agents[$ua_index % count($user_agents)];
     $ua_index++;
-
     $timeout     = isset($args['timeout']) ? (int) $args['timeout'] : 60;
     $extra_hdrs  = isset($args['headers']) ? (array) $args['headers'] : array();
 
-    // Use cURL when available – gives much better control over headers
-    // and handles gzip + brotli automatically, which reduces Klook blocking
     if (function_exists('curl_init')) {
+        // Persistent cookie file — keeps Cloudflare session tokens across requests
+        $cookie_file = sys_get_temp_dir() . '/fth_klook_session.txt';
+
+        // Complete Chrome 124 header set — closest match to a real browser
         $headers = array_merge(array(
-            'Accept'                    => 'text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,*/*;q=0.8',
+            'User-Agent'                => $ua,
+            'Accept'                    => 'text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,image/apng,*/*;q=0.8,application/signed-exchange;v=b3;q=0.7',
             'Accept-Language'           => 'en-US,en;q=0.9',
-            'Cache-Control'             => 'no-cache',
-            'Pragma'                    => 'no-cache',
+            'Accept-Encoding'           => 'gzip, deflate, br',
+            'Cache-Control'             => 'max-age=0',
+            'Connection'                => 'keep-alive',
+            'sec-ch-ua'                 => '"Google Chrome";v="124", "Chromium";v="124", "Not-A.Brand";v="99"',
+            'sec-ch-ua-mobile'          => '?0',
+            'sec-ch-ua-platform'        => '"Windows"',
             'Sec-Fetch-Dest'            => 'document',
             'Sec-Fetch-Mode'            => 'navigate',
             'Sec-Fetch-Site'            => 'none',
+            'Sec-Fetch-User'            => '?1',
             'Upgrade-Insecure-Requests' => '1',
-            'User-Agent'                => $ua,
         ), $extra_hdrs);
 
         $curl_headers = array();
@@ -120,15 +125,15 @@ private static function remote_get($url, $args = array()) {
             CURLOPT_MAXREDIRS      => 5,
             CURLOPT_TIMEOUT        => $timeout,
             CURLOPT_SSL_VERIFYPEER => false,
-            CURLOPT_ENCODING       => '', // Accept all encodings (gzip, deflate, br)
+            CURLOPT_ENCODING       => '', // auto-decompress gzip/deflate/br
             CURLOPT_HTTPHEADER     => $curl_headers,
-            CURLOPT_COOKIEJAR      => '',  // Accept and discard cookies
-            CURLOPT_COOKIEFILE     => '',
+            CURLOPT_COOKIEJAR      => $cookie_file,  // persist cookies between requests
+            CURLOPT_COOKIEFILE     => $cookie_file,
+            CURLOPT_HTTP_VERSION   => defined('CURL_HTTP_VERSION_2_0') ? CURL_HTTP_VERSION_2_0 : CURL_HTTP_VERSION_1_1,
         ));
 
         $body      = curl_exec($ch);
         $http_code = curl_getinfo($ch, CURLINFO_HTTP_CODE);
-        $final_url = curl_getinfo($ch, CURLINFO_EFFECTIVE_URL);
         $err       = curl_error($ch);
         curl_close($ch);
 
@@ -136,8 +141,6 @@ private static function remote_get($url, $args = array()) {
             return new WP_Error('curl_error', $err ?: 'Empty response from ' . $url);
         }
 
-        // Wrap in a WP_HTTP-compatible response array so callers can use
-        // wp_remote_retrieve_body() / wp_remote_retrieve_response_code() etc.
         return array(
             'body'     => $body,
             'response' => array('code' => $http_code, 'message' => ''),
@@ -146,24 +149,25 @@ private static function remote_get($url, $args = array()) {
         );
     }
 
-    // Fallback: wp_remote_get (less reliable against Klook, but always available)
-    $defaults = array(
+    // Fallback: wp_remote_get
+    return wp_remote_get($url, array(
         'timeout'     => $timeout,
         'redirection' => 5,
         'user-agent'  => $ua,
         'headers'     => array_merge(array(
-            'Accept'          => 'text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,*/*;q=0.8',
-            'Accept-Language' => 'en-US,en;q=0.9',
-            'Accept-Encoding' => 'gzip, deflate',
-            'Cache-Control'   => 'no-cache',
-            'Pragma'          => 'no-cache',
-            'Sec-Fetch-Dest'  => 'document',
-            'Sec-Fetch-Mode'  => 'navigate',
-            'Sec-Fetch-Site'  => 'none',
+            'Accept'                    => 'text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,*/*;q=0.8',
+            'Accept-Language'           => 'en-US,en;q=0.9',
+            'Accept-Encoding'           => 'gzip, deflate',
+            'Cache-Control'             => 'max-age=0',
+            'sec-ch-ua'                 => '"Google Chrome";v="124", "Chromium";v="124", "Not-A.Brand";v="99"',
+            'sec-ch-ua-mobile'          => '?0',
+            'Sec-Fetch-Dest'            => 'document',
+            'Sec-Fetch-Mode'            => 'navigate',
+            'Sec-Fetch-Site'            => 'none',
+            'Sec-Fetch-User'            => '?1',
             'Upgrade-Insecure-Requests' => '1',
         ), $extra_hdrs),
-    );
-    return wp_remote_get($url, $defaults);
+    ));
 }
 
 private static function build_affiliate_redirect($url) {
@@ -273,6 +277,10 @@ private static function is_valid_content_image_url($url) {
         if (stripos($url, $word) !== false) {
             return false;
         }
+    }
+    // Always accept Klook CDN URLs — their image URLs often lack a file extension
+    if (stripos($url, 'res.klook.com') !== false) {
+        return true;
     }
     return (bool) preg_match('/\.(jpe?g|png|webp)(\?.*)?$/i', $url);
 }
@@ -903,33 +911,36 @@ public static function import_bulk_city() {
         }
 
         // Fetch the real Klook page
-        $response = self::remote_get($url, array(
-            'timeout'     => 45,
-            'redirection' => 5,
-            'user-agent'  => 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/121.0.0.0 Safari/537.36',
-            'headers'     => array(
-                'Accept'          => 'text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,*/*;q=0.8',
-                'Accept-Language' => 'en-US,en;q=0.9',
-                'Accept-Encoding' => 'gzip, deflate',
-                'Cache-Control'   => 'no-cache',
-            ),
-        ));
-        
+        $response = self::remote_get($url, array('timeout' => 60, 'redirection' => 5));
+
         if (is_wp_error($response)) {
             return array('success' => false, 'message' => 'Failed to fetch URL: ' . $response->get_error_message());
         }
-        
+
         $body = wp_remote_retrieve_body($response);
         if (empty($body)) {
             return array('success' => false, 'message' => 'Empty response from Klook');
         }
-        
+
+        // If Cloudflare blocked us (no __NEXT_DATA__), retry without /en-US/ locale prefix
+        if (strpos($body, '__NEXT_DATA__') === false && strpos($url, '/en-US/') !== false) {
+            $url_no_locale = preg_replace('#/en-US/#', '/', $url);
+            $response2 = self::remote_get($url_no_locale, array('timeout' => 60, 'redirection' => 5));
+            if (!is_wp_error($response2)) {
+                $body2 = wp_remote_retrieve_body($response2);
+                if (!empty($body2) && strpos($body2, '__NEXT_DATA__') !== false) {
+                    $body = $body2;
+                    $url  = $url_no_locale;
+                }
+            }
+        }
+
         // Parse data
         $activity_id = '';
         if (preg_match('/\/activity\/(\d+)-/', $url, $match)) {
             $activity_id = $match[1];
         }
-        
+
         $data = self::parse_klook_html($body, $url, $activity_id);
         
         if (empty($data['title'])) {
@@ -940,7 +951,14 @@ public static function import_bulk_city() {
         if (!empty($original_deeplink) && strpos($original_deeplink, 'affiliate.klook.com') !== false) {
             $data['affiliate_link'] = $original_deeplink;
         }
-        
+
+        // Manual image URL override — admin can supply an image when auto-extraction fails
+        $manual_img = isset($params['manual_image_url']) ? esc_url_raw(trim($params['manual_image_url'])) : '';
+        if (!empty($manual_img) && preg_match('#^https?://#i', $manual_img)) {
+            $data['image']  = $manual_img;
+            $data['images'] = array_merge(array($manual_img), $data['images'] ?: array());
+        }
+
         // Create or update post
         $post_status = isset($params['publish']) && $params['publish'] ? 'publish' : 'draft';
         $existing_post_id = 0;
@@ -1301,6 +1319,12 @@ public static function import_bulk_city() {
         }
         if (!empty($original_deeplink) && strpos($original_deeplink, 'affiliate.klook.com') !== false) {
             $data['affiliate_link'] = $original_deeplink;
+        }
+        // Manual image URL override for hotels
+        $manual_img = isset($params['manual_image_url']) ? esc_url_raw(trim($params['manual_image_url'])) : '';
+        if (!empty($manual_img) && preg_match('#^https?://#i', $manual_img)) {
+            $data['image']  = $manual_img;
+            $data['images'] = array_merge(array($manual_img), $data['images'] ?: array());
         }
         $existing_post_id = 0;
         if (!empty($data['hotel_id'])) {
@@ -2107,11 +2131,15 @@ if (preg_match('/<script[^>]*id=["\']__NEXT_DATA__["\'][^>]*>(.*?)<\/script>/si'
             $all_images = array_merge($all_images, $img_matches[1]);
         }
         
-        // Find all Klook CDN images
+        // Find all Klook CDN images (with or without file extension)
         if (preg_match_all('/["\']?(https?:\/\/res\.klook\.com\/image\/upload\/[^"\'<>\s]+\.(?:jpg|jpeg|png|webp))["\']?/i', $html, $img_matches)) {
             $all_images = array_merge($all_images, $img_matches[1]);
         }
-        
+        // Klook CDN URLs without extension (common in __NEXT_DATA__ JSON)
+        if (preg_match_all('/"(https?:\/\/res\.klook\.com\/image\/upload\/[^"\'<>\s]{10,})"/i', $html, $img_matches)) {
+            $all_images = array_merge($all_images, $img_matches[1]);
+        }
+
         // Also check for other image patterns
         if (preg_match_all('/["\']?(https?:\/\/res\.klook\.com\/[^"\'<>\s]+\.(?:jpg|jpeg|png|webp))["\']?/i', $html, $img_matches)) {
             $all_images = array_merge($all_images, $img_matches[1]);

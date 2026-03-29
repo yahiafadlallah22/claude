@@ -138,6 +138,13 @@ body.single-travel_activity .widget-area,body.single-travel_activity .sidebar,bo
   .kl-mobile-cta-btn:hover{opacity:.9}
 }
 @media(max-width:640px){.kl-title{font-size:22px}.kl-related-grid{grid-template-columns:1fr}}
+/* Yahia promo box – mobile vs desktop visibility */
+.kl-yahia-mobile{display:none}
+.kl-yahia-desktop{display:block}
+@media(max-width:1100px){
+  .kl-yahia-mobile{display:block;background:#fff7ed;border:1px solid #fed7aa;border-radius:12px;padding:16px;text-align:center;margin-top:16px}
+  .kl-yahia-desktop{display:none}
+}
 </style>
 
 <div class="kl">
@@ -213,6 +220,15 @@ body.single-travel_activity .widget-area,body.single-travel_activity .sidebar,bo
         <h2 class="kl-sec-title"><span class="icon">ℹ</span> About this experience</h2>
         <div class="kl-content"><?php the_content(); ?></div>
         <?php if ($meeting_point): ?><p style="margin-top:14px;font-size:14px;"><strong>Meeting point:</strong> <?php echo esc_html($meeting_point); ?></p><?php endif; ?>
+      </div>
+
+      <!-- Yahia promo box – shown on mobile right after "About this experience" -->
+      <div class="kl-yahia-mobile">
+        <img src="https://yahiadubai.com/wp-content/uploads/2026/03/New-Project-4.png" alt="Yahia Fadlallah" style="max-width:100px;height:auto;display:block;margin:0 auto 10px;border-radius:8px;">
+        <div style="font-size:14px;color:#92400e;font-weight:700;">🤝 <?php echo esc_html($promo_text); ?></div>
+        <?php if ($affiliate_link): ?>
+        <a href="<?php echo esc_url($affiliate_link); ?>" target="_blank" rel="noopener noreferrer" style="display:inline-block;margin-top:10px;background:<?php echo esc_attr($primary); ?>;color:#fff;font-weight:800;font-size:14px;padding:10px 22px;border-radius:8px;text-decoration:none;">🎟 <?php echo esc_html($cta_text); ?></a>
+        <?php endif; ?>
       </div>
 
       <!-- Highlights -->
@@ -315,7 +331,7 @@ body.single-travel_activity .widget-area,body.single-travel_activity .sidebar,bo
         <a class="kl-cta" href="<?php echo esc_url($affiliate_link ?: '#'); ?>" target="_blank" rel="noopener noreferrer">
           🎟 <?php echo esc_html($cta_text); ?>
         </a>
-        <div style="background:#fff7ed;border:1px solid #fed7aa;border-radius:10px;padding:14px;text-align:center;margin-bottom:16px;">
+        <div class="kl-yahia-desktop" style="background:#fff7ed;border:1px solid #fed7aa;border-radius:10px;padding:14px;text-align:center;margin-bottom:16px;">
           <img src="https://yahiadubai.com/wp-content/uploads/2026/03/New-Project-4.png" alt="Yahia Fadlallah" style="max-width:120px;height:auto;display:block;margin:0 auto 8px;border-radius:8px;">
           <div style="font-size:13px;color:#92400e;font-weight:700;">🤝 <?php echo esc_html($promo_text); ?></div>
         </div>
