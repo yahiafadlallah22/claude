@@ -8,7 +8,7 @@ if (!defined('ABSPATH')) { exit; }
 $primary       = Flavor_Travel_Hub::get_primary_color();
 $secondary     = Flavor_Travel_Hub::get_secondary_color();
 $hero_title    = get_option('fth_hotels_hero_title', 'Worldwide Hotels');
-$hero_subtitle = get_option('fth_hotels_hero_subtitle', 'Comparez les hôtels, équipements et tarifs – présentés par Yahia Dubai.');
+$hero_subtitle = get_option('fth_hotels_hero_subtitle', 'Compare hotels, amenities and rates – curated by Yahia Dubai.');
 $hero_image    = get_option('fth_hotels_hero_image', 'https://images.unsplash.com/photo-1505693416388-ac5ce068fe85?w=1600');
 
 $all_countries = FTH_Taxonomies::get_countries(array('hide_empty' => false));
@@ -91,25 +91,25 @@ body.page .widget-area,body.page .sidebar,body.page .right_sidebar,body.page .pa
     <div class="klph-hero-bg"></div>
     <div class="klph-hero-overlay"></div>
     <div class="klph-hero-inner">
-      <div class="klph-hero-badge">🏨 Hôtels dans le monde entier</div>
+      <div class="klph-hero-badge">🏨 Hotels worldwide</div>
       <h1 class="klph-hero-title"><?php echo esc_html($hero_title); ?></h1>
       <p class="klph-hero-sub"><?php echo esc_html($hero_subtitle); ?></p>
       <form class="klph-search" method="get" action="<?php echo esc_url(FTH_Templates::get_hub_url('hotels')); ?>">
         <input type="hidden" name="fth_mode" value="hotels">
-        <input type="text" name="fth_search" placeholder="🔍 Rechercher un hôtel…" value="<?php echo esc_attr($sq); ?>">
+        <input type="text" name="fth_search" placeholder="🔍 Search for a hotel…" value="<?php echo esc_attr($sq); ?>">
         <select name="fth_city">
-          <option value="">Toutes les villes</option>
+          <option value="">All cities</option>
           <?php foreach ($sorted_cities as $city): ?>
           <option value="<?php echo esc_attr($city->slug); ?>" <?php selected($s_city, $city->slug); ?>><?php echo esc_html($city->name); ?></option>
           <?php endforeach; ?>
         </select>
         <select name="fth_country">
-          <option value="">Tous les pays</option>
+          <option value="">All countries</option>
           <?php foreach ($sorted_countries as $country): ?>
           <option value="<?php echo esc_attr($country->slug); ?>" <?php selected($s_ctr, $country->slug); ?>><?php echo esc_html($country->name); ?></option>
           <?php endforeach; ?>
         </select>
-        <button type="submit">Rechercher</button>
+        <button type="submit">Search</button>
       </form>
     </div>
   </section>
@@ -118,14 +118,14 @@ body.page .widget-area,body.page .sidebar,body.page .right_sidebar,body.page .pa
   <section class="klph-section">
     <div class="klph-wrap">
       <div class="klph-section-head">
-        <h2><?php echo esc_html($hotels->found_posts); ?> hôtels trouvés</h2>
-        <a href="<?php echo esc_url(FTH_Templates::get_hub_url('hotels')); ?>">← Retour</a>
+        <h2><?php echo esc_html($hotels->found_posts); ?> hotels found</h2>
+        <a href="<?php echo esc_url(FTH_Templates::get_hub_url('hotels')); ?>">← Back</a>
       </div>
       <div class="klph-grid">
         <?php if ($hotels->have_posts()): while ($hotels->have_posts()): $hotels->the_post();
           echo FTH_Templates::get_hotel_card(get_the_ID());
         endwhile; wp_reset_postdata();
-        else: ?><div class="klph-empty">Aucun hôtel trouvé.</div><?php endif; ?>
+        else: ?><div class="klph-empty">No hotels found.</div><?php endif; ?>
       </div>
       <?php if ($hotels->max_num_pages > 1): ?>
       <div class="klph-pag"><?php echo paginate_links(array('total' => (int)$hotels->max_num_pages, 'current' => $paged)); ?></div>
@@ -139,10 +139,10 @@ body.page .widget-area,body.page .sidebar,body.page .right_sidebar,body.page .pa
     <div class="klph-wrap">
       <div class="klph-dubai-banner">
         <div>
-          <h2>🇦🇪 Hôtels aux Émirats arabes unis</h2>
-          <p>Découvrez notre sélection d'hôtels à Dubaï et dans les Émirats – avec des promotions exclusives négociées par Yahia Fadlallah.</p>
+          <h2>🇦🇪 Hotels in the United Arab Emirates</h2>
+          <p>Discover our selection of hotels in Dubai and the UAE – with exclusive deals by Yahia Fadlallah.</p>
           <?php if ($dubai_term && !is_wp_error($dubai_term)): ?>
-          <a href="<?php echo esc_url(add_query_arg(array('fth_city' => $dubai_term->slug, 'fth_mode' => 'hotels'), FTH_Templates::get_hub_url('hotels'))); ?>">Voir les hôtels à Dubaï →</a>
+          <a href="<?php echo esc_url(add_query_arg(array('fth_city' => $dubai_term->slug, 'fth_mode' => 'hotels'), FTH_Templates::get_hub_url('hotels'))); ?>">View hotels in Dubai →</a>
           <?php endif; ?>
         </div>
         <div style="font-size:80px;flex:0 0 auto">🏙️</div>
@@ -154,9 +154,9 @@ body.page .widget-area,body.page .sidebar,body.page .right_sidebar,body.page .pa
   <section class="klph-section" style="padding-top:24px">
     <div class="klph-wrap">
       <div class="klph-section-head">
-        <h2>🔥 Hôtels populaires à Dubaï</h2>
+        <h2>🔥 Popular hotels in Dubai</h2>
         <?php if ($dubai_term && !is_wp_error($dubai_term)): ?>
-        <a href="<?php echo esc_url(add_query_arg(array('fth_city' => $dubai_term->slug, 'fth_mode' => 'hotels'), FTH_Templates::get_hub_url('hotels'))); ?>">Voir tout →</a>
+        <a href="<?php echo esc_url(add_query_arg(array('fth_city' => $dubai_term->slug, 'fth_mode' => 'hotels'), FTH_Templates::get_hub_url('hotels'))); ?>">View all →</a>
         <?php endif; ?>
       </div>
       <div class="klph-grid">
@@ -170,7 +170,7 @@ body.page .widget-area,body.page .sidebar,body.page .right_sidebar,body.page .pa
 
   <section class="klph-section" style="background:#fff">
     <div class="klph-wrap">
-      <div class="klph-section-head"><h2>🌍 Explorer par ville</h2></div>
+      <div class="klph-section-head"><h2>🌍 Explore by city</h2></div>
       <div class="klph-cities">
         <?php foreach (array_slice($sorted_cities, 0, 24) as $city): ?>
         <a class="klph-city-card" href="<?php echo esc_url(add_query_arg(array('fth_city' => $city->slug, 'fth_mode' => 'hotels'), FTH_Templates::get_hub_url('hotels'))); ?>">
@@ -184,12 +184,12 @@ body.page .widget-area,body.page .sidebar,body.page .right_sidebar,body.page .pa
 
   <section class="klph-section">
     <div class="klph-wrap">
-      <div class="klph-section-head"><h2>⭐ Hôtels en vedette</h2></div>
+      <div class="klph-section-head"><h2>⭐ Featured hotels</h2></div>
       <div class="klph-grid">
         <?php if ($hotels->have_posts()): while ($hotels->have_posts()): $hotels->the_post();
           echo FTH_Templates::get_hotel_card(get_the_ID());
         endwhile; wp_reset_postdata();
-        else: ?><div class="klph-empty">Importez des hôtels depuis l'admin pour les afficher ici.</div><?php endif; ?>
+        else: ?><div class="klph-empty">Import hotels from the admin to display them here.</div><?php endif; ?>
       </div>
     </div>
   </section>
@@ -199,25 +199,25 @@ body.page .widget-area,body.page .sidebar,body.page .right_sidebar,body.page .pa
   <footer class="klph-footer-nav">
     <div class="klph-footer-nav-in">
       <div>
-        <h4>🏨 Hôtels</h4>
+        <h4>🏨 Hotels</h4>
         <ul>
-          <li><a href="<?php echo esc_url(FTH_Templates::get_hub_url('hotels')); ?>">Tous les hôtels</a></li>
+          <li><a href="<?php echo esc_url(FTH_Templates::get_hub_url('hotels')); ?>">All hotels</a></li>
           <?php foreach (array_slice($sorted_cities, 0, 6) as $city): ?>
-          <li><a href="<?php echo esc_url(add_query_arg(array('fth_city' => $city->slug, 'fth_mode' => 'hotels'), FTH_Templates::get_hub_url('hotels'))); ?>">Hôtels à <?php echo esc_html($city->name); ?></a></li>
+          <li><a href="<?php echo esc_url(add_query_arg(array('fth_city' => $city->slug, 'fth_mode' => 'hotels'), FTH_Templates::get_hub_url('hotels'))); ?>">Hotels in <?php echo esc_html($city->name); ?></a></li>
           <?php endforeach; ?>
         </ul>
       </div>
       <div>
-        <h4>🎟️ Activités</h4>
+        <h4>🎟️ Activities</h4>
         <ul>
-          <li><a href="<?php echo esc_url(FTH_Templates::get_hub_url('things-to-do')); ?>">Toutes les activités</a></li>
+          <li><a href="<?php echo esc_url(FTH_Templates::get_hub_url('things-to-do')); ?>">All activities</a></li>
           <?php foreach (array_slice($sorted_cities, 0, 6) as $city): ?>
           <li><a href="<?php echo esc_url(get_term_link($city)); ?>"><?php echo esc_html($city->name); ?></a></li>
           <?php endforeach; ?>
         </ul>
       </div>
       <div>
-        <h4>🌍 Pays</h4>
+        <h4>🌍 Countries</h4>
         <ul>
           <?php foreach (array_slice($sorted_countries, 0, 6) as $ctr): ?>
           <li><a href="<?php echo esc_url(get_term_link($ctr)); ?>"><?php echo esc_html($ctr->name); ?></a></li>

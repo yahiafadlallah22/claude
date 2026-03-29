@@ -8,7 +8,7 @@ if (!defined('ABSPATH')) { exit; }
 $primary       = Flavor_Travel_Hub::get_primary_color();
 $secondary     = Flavor_Travel_Hub::get_secondary_color();
 $hero_title    = get_option('fth_things_hero_title', 'Worldwide Tours & Attractions');
-$hero_subtitle = get_option('fth_things_hero_subtitle', 'Découvrez des expériences uniques dans le monde entier – présentées par Yahia Dubai.');
+$hero_subtitle = get_option('fth_things_hero_subtitle', 'Discover unique experiences worldwide – curated by Yahia Dubai.');
 $hero_image    = get_option('fth_things_hero_image', 'https://images.unsplash.com/photo-1476514525535-07fb3b4ae5f1?w=1920');
 
 // Klook category icons map
@@ -159,32 +159,32 @@ body.page .widget-area,body.page .sidebar,body.page .right_sidebar,body.page .pa
     <div class="klp-hero-bg"></div>
     <div class="klp-hero-overlay"></div>
     <div class="klp-hero-inner">
-      <div class="klp-hero-badge">🎟️ Tours · Attractions · Activités</div>
+      <div class="klp-hero-badge">🎟️ Tours · Attractions · Activities</div>
       <h1 class="klp-hero-title"><?php echo esc_html($hero_title); ?></h1>
       <p class="klp-hero-sub"><?php echo esc_html($hero_subtitle); ?></p>
       <!-- Search -->
       <form class="klp-search" method="get" action="<?php echo esc_url(FTH_Templates::get_hub_url('things-to-do')); ?>">
         <input type="hidden" name="fth_mode" value="activities">
-        <input type="text" name="fth_search" placeholder="🔍 Que voulez-vous faire ?" value="<?php echo esc_attr($sq); ?>">
+        <input type="text" name="fth_search" placeholder="🔍 What would you like to do?" value="<?php echo esc_attr($sq); ?>">
         <select name="fth_city">
-          <option value="">Toutes les villes</option>
+          <option value="">All cities</option>
           <?php foreach ($sorted_cities as $city): ?>
           <option value="<?php echo esc_attr($city->slug); ?>" <?php selected($s_city, $city->slug); ?>><?php echo esc_html($city->name); ?></option>
           <?php endforeach; ?>
         </select>
         <select name="fth_country">
-          <option value="">Tous les pays</option>
+          <option value="">All countries</option>
           <?php foreach ($sorted_countries as $country): ?>
           <option value="<?php echo esc_attr($country->slug); ?>" <?php selected($s_ctr, $country->slug); ?>><?php echo esc_html($country->name); ?></option>
           <?php endforeach; ?>
         </select>
         <select name="fth_category">
-          <option value="">Toutes les catégories</option>
+          <option value="">All categories</option>
           <?php if (!is_wp_error($all_categories)) foreach ($all_categories as $cat): ?>
           <option value="<?php echo esc_attr($cat->slug); ?>" <?php selected($s_cat, $cat->slug); ?>><?php echo esc_html($cat->name); ?></option>
           <?php endforeach; ?>
         </select>
-        <button type="submit">Rechercher</button>
+        <button type="submit">Search</button>
       </form>
     </div>
   </section>
@@ -194,7 +194,7 @@ body.page .widget-area,body.page .sidebar,body.page .right_sidebar,body.page .pa
   <div class="klp-cats-bar">
     <div class="klp-cats-bar-in">
       <a class="klp-cat-btn active" href="<?php echo esc_url(FTH_Templates::get_hub_url('things-to-do')); ?>">
-        <span class="cat-icon">🌍</span><span>Tout</span>
+        <span class="cat-icon">🌍</span><span>All</span>
       </a>
       <?php foreach (array_slice((array)$all_categories, 0, 14) as $cat):
         $icon = $cat_icons[$cat->slug] ?? '🎯';
@@ -213,14 +213,14 @@ body.page .widget-area,body.page .sidebar,body.page .right_sidebar,body.page .pa
   <section class="klp-section">
     <div class="klp-wrap">
       <div class="klp-section-head">
-        <h2><?php echo esc_html($activities->found_posts); ?> résultats trouvés</h2>
-        <a href="<?php echo esc_url(FTH_Templates::get_hub_url('things-to-do')); ?>">← Retour</a>
+        <h2><?php echo esc_html($activities->found_posts); ?> results found</h2>
+        <a href="<?php echo esc_url(FTH_Templates::get_hub_url('things-to-do')); ?>">← Back</a>
       </div>
       <div class="klp-grid">
         <?php if ($activities->have_posts()): while ($activities->have_posts()): $activities->the_post();
           echo FTH_Templates::get_activity_card(get_the_ID());
         endwhile; wp_reset_postdata();
-        else: ?><div class="klp-empty">Aucun résultat pour cette recherche.</div><?php endif; ?>
+        else: ?><div class="klp-empty">No results for this search.</div><?php endif; ?>
       </div>
       <?php if ($activities->max_num_pages > 1): ?>
       <div class="klp-pag"><?php echo paginate_links(array('total' => (int)$activities->max_num_pages, 'current' => $paged)); ?></div>
@@ -236,10 +236,10 @@ body.page .widget-area,body.page .sidebar,body.page .right_sidebar,body.page .pa
     <div class="klp-wrap">
       <div class="klp-dubai-banner">
         <div>
-          <h2>🇦🇪 Émirats arabes unis &amp; Dubaï</h2>
-          <p>Notre destination phare – des dizaines d'activités, tours et hôtels soigneusement sélectionnés avec des promotions négociées par Yahia Fadlallah.</p>
+          <h2>🇦🇪 United Arab Emirates &amp; Dubai</h2>
+          <p>Our flagship destination – dozens of activities, tours and hotels carefully selected with exclusive deals by Yahia Fadlallah.</p>
           <?php if ($dubai_term && !is_wp_error($dubai_term)): ?>
-          <a href="<?php echo esc_url(get_term_link($dubai_term)); ?>">Explorer Dubaï →</a>
+          <a href="<?php echo esc_url(get_term_link($dubai_term)); ?>">Explore Dubai →</a>
           <?php endif; ?>
         </div>
         <div style="font-size:80px;flex:0 0 auto">🐪</div>
@@ -252,9 +252,9 @@ body.page .widget-area,body.page .sidebar,body.page .right_sidebar,body.page .pa
   <section class="klp-section" style="padding-top:24px">
     <div class="klp-wrap">
       <div class="klp-section-head">
-        <h2>🔥 Activités populaires à Dubaï</h2>
+        <h2>🔥 Popular activities in Dubai</h2>
         <?php if ($dubai_term && !is_wp_error($dubai_term)): ?>
-        <a href="<?php echo esc_url(get_term_link($dubai_term)); ?>">Voir tout →</a>
+        <a href="<?php echo esc_url(get_term_link($dubai_term)); ?>">View all →</a>
         <?php endif; ?>
       </div>
       <div class="klp-grid">
@@ -270,7 +270,7 @@ body.page .widget-area,body.page .sidebar,body.page .right_sidebar,body.page .pa
   <?php if (!empty($sorted_cities)): ?>
   <section class="klp-section" style="background:#fff">
     <div class="klp-wrap">
-      <div class="klp-section-head"><h2>🌍 Explorer par ville</h2></div>
+      <div class="klp-section-head"><h2>🌍 Explore by city</h2></div>
       <div class="klp-cities">
         <?php foreach (array_slice($sorted_cities, 0, 24) as $city):
           $hero = get_term_meta($city->term_id, 'fth_hero_image', true);
@@ -279,7 +279,7 @@ body.page .widget-area,body.page .sidebar,body.page .right_sidebar,body.page .pa
         <a class="klp-city-card" href="<?php echo esc_url(get_term_link($city)); ?>">
           <div class="flag"><?php echo ($city->name === 'Dubai' || $city->name === 'Dubaï') ? '🇦🇪' : '📍'; ?></div>
           <div><?php echo esc_html($city->name); ?></div>
-          <?php if ($count): ?><div style="font-size:11px;color:#999;margin-top:4px;font-weight:500"><?php echo $count; ?> activité<?php echo $count > 1 ? 's' : ''; ?></div><?php endif; ?>
+          <?php if ($count): ?><div style="font-size:11px;color:#999;margin-top:4px;font-weight:500"><?php echo $count; ?> activit<?php echo $count > 1 ? 'ies' : 'y'; ?></div><?php endif; ?>
         </a>
         <?php endforeach; ?>
       </div>
@@ -290,12 +290,12 @@ body.page .widget-area,body.page .sidebar,body.page .right_sidebar,body.page .pa
   <!-- Popular worldwide picks -->
   <section class="klp-section">
     <div class="klp-wrap">
-      <div class="klp-section-head"><h2>⭐ Coups de cœur dans le monde</h2></div>
+      <div class="klp-section-head"><h2>⭐ Top picks worldwide</h2></div>
       <div class="klp-grid">
         <?php if ($activities->have_posts()): while ($activities->have_posts()): $activities->the_post();
           echo FTH_Templates::get_activity_card(get_the_ID());
         endwhile; wp_reset_postdata();
-        else: ?><div class="klp-empty">Importez des activités depuis l'admin pour les afficher ici.</div><?php endif; ?>
+        else: ?><div class="klp-empty">Import activities from the admin to display them here.</div><?php endif; ?>
       </div>
     </div>
   </section>
@@ -306,11 +306,11 @@ body.page .widget-area,body.page .sidebar,body.page .right_sidebar,body.page .pa
   <footer class="klp-footer-nav">
     <div class="klp-footer-nav-in">
       <div>
-        <h4>🎟️ Activités</h4>
+        <h4>🎟️ Activities</h4>
         <ul>
-          <li><a href="<?php echo esc_url(FTH_Templates::get_hub_url('things-to-do')); ?>">Toutes les activités</a></li>
+          <li><a href="<?php echo esc_url(FTH_Templates::get_hub_url('things-to-do')); ?>">All activities</a></li>
           <?php if ($dubai_term && !is_wp_error($dubai_term)): ?>
-          <li><a href="<?php echo esc_url(get_term_link($dubai_term)); ?>">Activités à Dubaï</a></li>
+          <li><a href="<?php echo esc_url(get_term_link($dubai_term)); ?>">Activities in Dubai</a></li>
           <?php endif; ?>
           <?php foreach (array_slice((array)$sorted_cities, 0, 6) as $city): ?>
           <li><a href="<?php echo esc_url(get_term_link($city)); ?>"><?php echo esc_html($city->name); ?></a></li>
@@ -318,11 +318,11 @@ body.page .widget-area,body.page .sidebar,body.page .right_sidebar,body.page .pa
         </ul>
       </div>
       <div>
-        <h4>🏨 Hôtels</h4>
+        <h4>🏨 Hotels</h4>
         <ul>
-          <li><a href="<?php echo esc_url(FTH_Templates::get_hub_url('hotels')); ?>">Tous les hôtels</a></li>
+          <li><a href="<?php echo esc_url(FTH_Templates::get_hub_url('hotels')); ?>">All hotels</a></li>
           <?php foreach (array_slice((array)$sorted_cities, 0, 6) as $city): ?>
-          <li><a href="<?php echo esc_url(add_query_arg(array('fth_city' => $city->slug, 'fth_mode' => 'hotels'), FTH_Templates::get_hub_url('hotels'))); ?>">Hôtels à <?php echo esc_html($city->name); ?></a></li>
+          <li><a href="<?php echo esc_url(add_query_arg(array('fth_city' => $city->slug, 'fth_mode' => 'hotels'), FTH_Templates::get_hub_url('hotels'))); ?>">Hotels in <?php echo esc_html($city->name); ?></a></li>
           <?php endforeach; ?>
         </ul>
       </div>

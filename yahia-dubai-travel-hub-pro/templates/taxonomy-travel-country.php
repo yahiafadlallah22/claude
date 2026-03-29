@@ -4,7 +4,7 @@
  */
 if (!defined('ABSPATH')) { exit; }
 $term = get_queried_object();
-if (!$term || is_wp_error($term)) { get_header(); echo '<div style="max-width:900px;margin:60px auto;padding:0 20px;text-align:center"><h1>Pays introuvable</h1><a href="' . esc_url(home_url('/')) . '">Retour</a></div>'; get_footer(); return; }
+if (!$term || is_wp_error($term)) { get_header(); echo '<div style="max-width:900px;margin:60px auto;padding:0 20px;text-align:center"><h1>Country not found</h1><a href="' . esc_url(home_url('/')) . '">Back</a></div>'; get_footer(); return; }
 
 $primary     = Flavor_Travel_Hub::get_primary_color();
 $flag        = FTH_Templates::get_country_flag($term);
@@ -51,19 +51,19 @@ body.tax-travel_country .widget-area,body.tax-travel_country .sidebar,body.tax-t
   <section class="klco-hero"><div class="klco-wrap">
     <div class="flag"><?php echo esc_html($flag); ?></div>
     <h1><?php echo esc_html($term->name); ?></h1>
-    <p>Explorez les villes, activités et hôtels en <?php echo esc_html($term->name); ?>.</p>
+    <p>Explore cities, activities and hotels in <?php echo esc_html($term->name); ?>.</p>
     <form class="klco-search" method="get" action="<?php echo esc_url(FTH_Templates::get_hub_url('things-to-do')); ?>">
       <input type="hidden" name="fth_mode" value="activities">
       <input type="hidden" name="fth_country" value="<?php echo esc_attr($term->slug); ?>">
-      <input type="text" name="fth_search" placeholder="🔍 Rechercher en <?php echo esc_attr($term->name); ?>" value="<?php echo esc_attr($sq); ?>">
-      <button type="submit">Rechercher</button>
+      <input type="text" name="fth_search" placeholder="🔍 Search in <?php echo esc_attr($term->name); ?>" value="<?php echo esc_attr($sq); ?>">
+      <button type="submit">Search</button>
     </form>
   </div></section>
 
   <?php if (!empty($cities) && !is_wp_error($cities)): ?>
   <section class="klco-section">
     <div class="klco-wrap">
-      <div class="klco-head"><h2>Villes en <?php echo esc_html($term->name); ?></h2></div>
+      <div class="klco-head"><h2>Cities in <?php echo esc_html($term->name); ?></h2></div>
       <div class="klco-cities">
         <?php foreach ($cities as $city): ?>
         <a class="klco-city-card" href="<?php echo esc_url(get_term_link($city)); ?>">📍 <?php echo esc_html($city->name); ?></a>
@@ -76,7 +76,7 @@ body.tax-travel_country .widget-area,body.tax-travel_country .sidebar,body.tax-t
   <?php if ($activities->have_posts()): ?>
   <section class="klco-section" style="padding-top:0">
     <div class="klco-wrap">
-      <div class="klco-head"><h2>🎟️ Activités en <?php echo esc_html($term->name); ?></h2></div>
+      <div class="klco-head"><h2>🎟️ Activities in <?php echo esc_html($term->name); ?></h2></div>
       <div class="klco-grid">
         <?php while ($activities->have_posts()): $activities->the_post();
           echo FTH_Templates::get_activity_card(get_the_ID());
@@ -89,7 +89,7 @@ body.tax-travel_country .widget-area,body.tax-travel_country .sidebar,body.tax-t
   <?php if ($hotels->have_posts()): ?>
   <section class="klco-section" style="padding-top:0;background:#fff">
     <div class="klco-wrap">
-      <div class="klco-head"><h2>🏨 Hôtels en <?php echo esc_html($term->name); ?></h2></div>
+      <div class="klco-head"><h2>🏨 Hotels in <?php echo esc_html($term->name); ?></h2></div>
       <div class="klco-grid">
         <?php while ($hotels->have_posts()): $hotels->the_post();
           echo FTH_Templates::get_hotel_card(get_the_ID());
@@ -104,27 +104,27 @@ body.tax-travel_country .widget-area,body.tax-travel_country .sidebar,body.tax-t
   <footer class="klco-footer-nav">
     <div class="klco-footer-nav-in">
       <div>
-        <h4>Activités</h4>
+        <h4>Activities</h4>
         <ul>
-          <li><a href="<?php echo esc_url(FTH_Templates::get_hub_url('things-to-do')); ?>">Toutes les activités</a></li>
+          <li><a href="<?php echo esc_url(FTH_Templates::get_hub_url('things-to-do')); ?>">All activities</a></li>
           <?php if (!empty($cities) && !is_wp_error($cities)) foreach (array_slice((array)$cities, 0, 4) as $c): ?>
           <li><a href="<?php echo esc_url(get_term_link($c)); ?>"><?php echo esc_html($c->name); ?></a></li>
           <?php endforeach; ?>
         </ul>
       </div>
       <div>
-        <h4>Hôtels</h4>
+        <h4>Hotels</h4>
         <ul>
-          <li><a href="<?php echo esc_url(FTH_Templates::get_hub_url('hotels')); ?>">Tous les hôtels</a></li>
+          <li><a href="<?php echo esc_url(FTH_Templates::get_hub_url('hotels')); ?>">All hotels</a></li>
           <?php if (!empty($cities) && !is_wp_error($cities)) foreach (array_slice((array)$cities, 0, 4) as $c): ?>
-          <li><a href="<?php echo esc_url(add_query_arg(array('fth_city' => $c->slug, 'fth_mode' => 'hotels'), FTH_Templates::get_hub_url('hotels'))); ?>">Hôtels – <?php echo esc_html($c->name); ?></a></li>
+          <li><a href="<?php echo esc_url(add_query_arg(array('fth_city' => $c->slug, 'fth_mode' => 'hotels'), FTH_Templates::get_hub_url('hotels'))); ?>">Hotels – <?php echo esc_html($c->name); ?></a></li>
           <?php endforeach; ?>
         </ul>
       </div>
       <div>
         <h4>Destinations</h4>
         <ul>
-          <li><a href="<?php echo esc_url(FTH_Templates::get_hub_url('things-to-do')); ?>">Monde entier</a></li>
+          <li><a href="<?php echo esc_url(FTH_Templates::get_hub_url('things-to-do')); ?>">Worldwide</a></li>
         </ul>
       </div>
     </div>

@@ -468,6 +468,56 @@ class FTH_Seed_Data {
             array('name' => 'Australia','slug' => 'australia','description' => 'Explore Australia\'s cities, coastlines and bucket-list experiences.'),
             array('name' => 'Switzerland','slug' => 'switzerland','description' => 'Discover scenic rail journeys, mountains and premium travel experiences in Switzerland.'),
             array('name' => 'Germany','slug' => 'germany','description' => 'Explore Germany\'s historic cities, culture and major attractions.'),
+            // Middle East
+            array('name' => 'Oman','slug' => 'oman','description' => 'Discover Oman\'s dramatic landscapes, ancient forts and authentic Arabian experiences.'),
+            array('name' => 'Bahrain','slug' => 'bahrain','description' => 'Explore Bahrain\'s rich history, Formula 1 circuit and pearl diving heritage.'),
+            array('name' => 'Kuwait','slug' => 'kuwait','description' => 'Experience Kuwait\'s modern skyline, souk culture and Gulf hospitality.'),
+            array('name' => 'Jordan','slug' => 'jordan','description' => 'Discover Jordan\'s ancient Petra, Wadi Rum desert and Dead Sea wonders.'),
+            array('name' => 'Israel','slug' => 'israel','description' => 'Explore Israel\'s holy sites, beaches and diverse cultural experiences.'),
+            // Asia Pacific
+            array('name' => 'Taiwan','slug' => 'taiwan','description' => 'Explore Taiwan\'s night markets, temples and stunning mountain landscapes.'),
+            array('name' => 'Cambodia','slug' => 'cambodia','description' => 'Discover the ancient temples of Angkor and Cambodia\'s rich cultural heritage.'),
+            array('name' => 'Sri Lanka','slug' => 'sri-lanka','description' => 'Explore Sri Lanka\'s ancient ruins, tropical beaches and wildlife safaris.'),
+            array('name' => 'India','slug' => 'india','description' => 'Discover India\'s iconic landmarks, spice markets and diverse cultural experiences.'),
+            array('name' => 'Maldives','slug' => 'maldives','description' => 'Experience the Maldives\' overwater villas, crystal-clear lagoons and coral reefs.'),
+            array('name' => 'Nepal','slug' => 'nepal','description' => 'Trek through Nepal\'s Himalayan landscapes and explore ancient temples.'),
+            array('name' => 'Vietnam','slug' => 'vietnam','description' => 'Explore Vietnam\'s cities, cuisine, coastlines and cultural highlights.'),
+            array('name' => 'Philippines','slug' => 'philippines','description' => 'Discover island escapes, cities and travel experiences across the Philippines.'),
+            array('name' => 'Myanmar','slug' => 'myanmar','description' => 'Discover Myanmar\'s ancient pagodas, scenic landscapes and traditional culture.'),
+            array('name' => 'Brunei','slug' => 'brunei','description' => 'Explore Brunei\'s golden mosque, rainforest and Malay cultural heritage.'),
+            // Europe extended
+            array('name' => 'Netherlands','slug' => 'netherlands','description' => 'Discover the Netherlands\' tulip fields, windmills and world-class museums.'),
+            array('name' => 'Greece','slug' => 'greece','description' => 'Explore ancient ruins, island sunsets and Mediterranean cuisine in Greece.'),
+            array('name' => 'Portugal','slug' => 'portugal','description' => 'Discover Portugal\'s historic cities, beaches and world-famous wines.'),
+            array('name' => 'Austria','slug' => 'austria','description' => 'Experience Austria\'s imperial palaces, alpine scenery and classical music heritage.'),
+            array('name' => 'Czech Republic','slug' => 'czech-republic','description' => 'Explore Prague\'s fairy-tale architecture, historic castles and Czech culture.'),
+            array('name' => 'Hungary','slug' => 'hungary','description' => 'Discover Budapest\'s thermal baths, stunning architecture and rich history.'),
+            array('name' => 'Belgium','slug' => 'belgium','description' => 'Explore Belgium\'s medieval cities, chocolate, beer and stunning art museums.'),
+            array('name' => 'Croatia','slug' => 'croatia','description' => 'Discover Croatia\'s Adriatic coastline, ancient walled cities and island hopping.'),
+            array('name' => 'Iceland','slug' => 'iceland','description' => 'Experience Iceland\'s Northern Lights, geysers, waterfalls and volcanic landscapes.'),
+            array('name' => 'Norway','slug' => 'norway','description' => 'Explore Norway\'s majestic fjords, Northern Lights and coastal fishing villages.'),
+            array('name' => 'Sweden','slug' => 'sweden','description' => 'Discover Sweden\'s design culture, Viking history and stunning archipelagos.'),
+            array('name' => 'Denmark','slug' => 'denmark','description' => 'Explore Denmark\'s fairy-tale castles, vibrant Copenhagen and Scandinavian design.'),
+            array('name' => 'Finland','slug' => 'finland','description' => 'Experience Finland\'s sauna culture, Aurora Borealis and pristine nature.'),
+            array('name' => 'Poland','slug' => 'poland','description' => 'Discover Poland\'s medieval old towns, rich history and vibrant culture.'),
+            array('name' => 'Ireland','slug' => 'ireland','description' => 'Explore Ireland\'s green landscapes, ancient castles and lively pub culture.'),
+            // Africa
+            array('name' => 'Kenya','slug' => 'kenya','description' => 'Experience Kenya\'s iconic safaris, Maasai culture and beautiful coastline.'),
+            array('name' => 'South Africa','slug' => 'south-africa','description' => 'Discover South Africa\'s Big Five safari, Cape winelands and coastal cities.'),
+            array('name' => 'Tanzania','slug' => 'tanzania','description' => 'Explore Tanzania\'s Serengeti, Kilimanjaro and Zanzibar island paradise.'),
+            array('name' => 'Tunisia','slug' => 'tunisia','description' => 'Discover Tunisia\'s ancient ruins, Sahara desert and Mediterranean beaches.'),
+            // Americas
+            array('name' => 'United States','slug' => 'united-states','description' => 'Explore city breaks, attractions and iconic travel experiences across the USA.'),
+            array('name' => 'Canada','slug' => 'canada','description' => 'Discover Canada\'s urban attractions, nature and year-round travel experiences.'),
+            array('name' => 'Mexico','slug' => 'mexico','description' => 'Explore Mexico\'s ancient ruins, vibrant cities and stunning beaches.'),
+            array('name' => 'Peru','slug' => 'peru','description' => 'Discover Peru\'s Machu Picchu, Amazon rainforest and rich Inca heritage.'),
+            array('name' => 'Brazil','slug' => 'brazil','description' => 'Experience Brazil\'s carnival, Amazon river, iconic cities and beaches.'),
+            array('name' => 'Argentina','slug' => 'argentina','description' => 'Discover Argentina\'s Patagonia, tango culture and world-class wines.'),
+            array('name' => 'Colombia','slug' => 'colombia','description' => 'Explore Colombia\'s vibrant cities, coffee regions and Caribbean coast.'),
+            array('name' => 'Chile','slug' => 'chile','description' => 'Discover Chile\'s Atacama desert, Patagonian glaciers and Easter Island.'),
+            // Oceania
+            array('name' => 'Australia','slug' => 'australia','description' => 'Explore Australia\'s cities, coastlines and bucket-list experiences.'),
+            array('name' => 'New Zealand','slug' => 'new-zealand','description' => 'Experience New Zealand\'s stunning landscapes, Maori culture and adventure sports.'),
         );
         
         foreach ($countries as $country) {
@@ -707,13 +757,150 @@ class FTH_Seed_Data {
                 'desc'    => 'Stand before the Great Pyramids and explore Cairo\'s ancient treasures.',
             ),
             // Malaysia
-            array(
-                'name'    => 'Kuala Lumpur',
-                'slug'    => 'kuala-lumpur',
-                'country' => 'malaysia',
-                'hero'    => 'https://images.unsplash.com/photo-1596422846543-75c6fc197f07?w=1920',
-                'desc'    => 'Marvel at the Petronas Towers and experience Kuala Lumpur\'s diverse culture.',
-            ),
+            array('name'=>'Kuala Lumpur','slug'=>'kuala-lumpur','country'=>'malaysia','hero'=>'https://images.unsplash.com/photo-1596422846543-75c6fc197f07?w=1920','desc'=>'Marvel at the Petronas Towers and experience Kuala Lumpur\'s diverse culture.'),
+            array('name'=>'Penang','slug'=>'penang','country'=>'malaysia','hero'=>'https://images.unsplash.com/photo-1566024349078-3c7d31bcadfe?w=1920','desc'=>'Explore Penang\'s UNESCO heritage streets, temples and world-famous street food.'),
+            array('name'=>'Langkawi','slug'=>'langkawi','country'=>'malaysia','hero'=>'https://images.unsplash.com/photo-1506905925346-21bda4d32df4?w=1920','desc'=>'Discover Langkawi\'s tropical beaches, cable car and duty-free island experiences.'),
+            // South Korea
+            array('name'=>'Seoul','slug'=>'seoul','country'=>'south-korea','hero'=>'https://images.unsplash.com/photo-1538485399081-7191377e8241?w=1920','desc'=>'Experience Seoul\'s palaces, K-pop culture, street food and modern city life.'),
+            array('name'=>'Busan','slug'=>'busan','country'=>'south-korea','hero'=>'https://images.unsplash.com/photo-1545579133-99bb5ad189be?w=1920','desc'=>'Discover Busan\'s beautiful beaches, fish markets and vibrant hillside villages.'),
+            array('name'=>'Jeju Island','slug'=>'jeju','country'=>'south-korea','hero'=>'https://images.unsplash.com/photo-1598935898639-81586f7d2129?w=1920','desc'=>'Explore Jeju\'s volcanic landscapes, waterfalls and pristine beaches.'),
+            // Hong Kong
+            array('name'=>'Hong Kong','slug'=>'hong-kong-city','country'=>'hong-kong','hero'=>'https://images.unsplash.com/photo-1508804185872-d7badad00f7d?w=1920','desc'=>'Experience Hong Kong\'s iconic skyline, dim sum culture and harbour views.'),
+            // China
+            array('name'=>'Beijing','slug'=>'beijing','country'=>'china','hero'=>'https://images.unsplash.com/photo-1508804052814-cd3ba865a116?w=1920','desc'=>'Visit the Great Wall, Forbidden City and other magnificent Beijing landmarks.'),
+            array('name'=>'Shanghai','slug'=>'shanghai','country'=>'china','hero'=>'https://images.unsplash.com/photo-1545893835-abaa50cbe628?w=1920','desc'=>'Explore Shanghai\'s futuristic skyline, art deco Bund and vibrant culture.'),
+            array('name'=>'Guilin','slug'=>'guilin','country'=>'china','hero'=>'https://images.unsplash.com/photo-1534430480872-3498386e7856?w=1920','desc'=>'Cruise through Guilin\'s stunning karst mountains and Li River scenery.'),
+            array('name'=>'Xi\'an','slug'=>'xian','country'=>'china','hero'=>'https://images.unsplash.com/photo-1608623374849-ac2c0becc15b?w=1920','desc'=>'Discover Xi\'an\'s Terracotta Army, ancient city walls and silk road heritage.'),
+            array('name'=>'Chengdu','slug'=>'chengdu','country'=>'china','hero'=>'https://images.unsplash.com/photo-1591123120675-6f7f1aae0e38?w=1920','desc'=>'Meet giant pandas and explore Chengdu\'s spicy cuisine and tea culture.'),
+            // Vietnam
+            array('name'=>'Hanoi','slug'=>'hanoi','country'=>'vietnam','hero'=>'https://images.unsplash.com/photo-1583417319070-4a69db38a482?w=1920','desc'=>'Explore Hanoi\'s Old Quarter, street food and colonial architecture.'),
+            array('name'=>'Ho Chi Minh City','slug'=>'ho-chi-minh-city','country'=>'vietnam','hero'=>'https://images.unsplash.com/photo-1583417319070-4a69db38a482?w=1920','desc'=>'Discover the energy of Ho Chi Minh City with its war history and street life.'),
+            array('name'=>'Halong Bay','slug'=>'halong-bay','country'=>'vietnam','hero'=>'https://images.unsplash.com/photo-1528127269322-539801943592?w=1920','desc'=>'Cruise through Halong Bay\'s emerald waters and limestone islands.'),
+            array('name'=>'Da Nang','slug'=>'da-nang','country'=>'vietnam','hero'=>'https://images.unsplash.com/photo-1559627776-c8c8f9ed5db6?w=1920','desc'=>'Enjoy Da Nang\'s beaches, Dragon Bridge and the nearby ancient Hoi An.'),
+            array('name'=>'Hoi An','slug'=>'hoi-an','country'=>'vietnam','hero'=>'https://images.unsplash.com/photo-1559628233-100c798642d4?w=1920','desc'=>'Walk through Hoi An\'s UNESCO lantern-lit old town and riverside charm.'),
+            // Philippines
+            array('name'=>'Manila','slug'=>'manila','country'=>'philippines','hero'=>'https://images.unsplash.com/photo-1572252009286-268acec5ca0a?w=1920','desc'=>'Discover Manila\'s Spanish colonial sites, vibrant food scene and city energy.'),
+            array('name'=>'Palawan','slug'=>'palawan','country'=>'philippines','hero'=>'https://images.unsplash.com/photo-1559494007-9f5847c49d94?w=1920','desc'=>'Explore Palawan\'s world-famous Underground River and turquoise lagoons.'),
+            array('name'=>'Cebu','slug'=>'cebu','country'=>'philippines','hero'=>'https://images.unsplash.com/photo-1555400182-cbaa32f97c14?w=1920','desc'=>'Dive with whale sharks and enjoy Cebu\'s beaches and historic landmarks.'),
+            // Taiwan
+            array('name'=>'Taipei','slug'=>'taipei','country'=>'taiwan','hero'=>'https://images.unsplash.com/photo-1470004914212-05527e49370b?w=1920','desc'=>'Experience Taipei\'s night markets, Taipei 101, hot springs and temple culture.'),
+            // Cambodia
+            array('name'=>'Siem Reap','slug'=>'siem-reap','country'=>'cambodia','hero'=>'https://images.unsplash.com/photo-1575310-b10b3d2c1a69?w=1920','desc'=>'Explore the ancient temples of Angkor Wat from the gateway city of Siem Reap.'),
+            // Sri Lanka
+            array('name'=>'Colombo','slug'=>'colombo','country'=>'sri-lanka','hero'=>'https://images.unsplash.com/photo-1578470024234-6d2f94f26e4e?w=1920','desc'=>'Discover Colombo\'s colonial heritage, local cuisine and vibrant urban energy.'),
+            array('name'=>'Kandy','slug'=>'kandy','country'=>'sri-lanka','hero'=>'https://images.unsplash.com/photo-1553955578-38cbc7d3e3e4?w=1920','desc'=>'Visit Kandy\'s sacred Temple of the Tooth and scenic mountain surroundings.'),
+            // India
+            array('name'=>'Delhi','slug'=>'delhi','country'=>'india','hero'=>'https://images.unsplash.com/photo-1587474260584-136574528ed5?w=1920','desc'=>'Explore Delhi\'s Mughal monuments, street bazaars and rich multicultural life.'),
+            array('name'=>'Mumbai','slug'=>'mumbai','country'=>'india','hero'=>'https://images.unsplash.com/photo-1529253355930-ddbe423a2ac7?w=1920','desc'=>'Experience Mumbai\'s Bollywood glamour, Gateway of India and coastal energy.'),
+            array('name'=>'Agra','slug'=>'agra','country'=>'india','hero'=>'https://images.unsplash.com/photo-1548013146-72479768bada?w=1920','desc'=>'Marvel at the Taj Mahal and Agra Fort in this iconic UNESCO heritage city.'),
+            array('name'=>'Jaipur','slug'=>'jaipur','country'=>'india','hero'=>'https://images.unsplash.com/photo-1599661046827-dacff0c0f09a?w=1920','desc'=>'Explore the Pink City\'s palaces, forts and vibrant Rajasthani culture.'),
+            array('name'=>'Goa','slug'=>'goa','country'=>'india','hero'=>'https://images.unsplash.com/photo-1512343879784-a960bf40e7f2?w=1920','desc'=>'Relax on Goa\'s beaches, explore Portuguese heritage and enjoy vibrant nightlife.'),
+            // Maldives
+            array('name'=>'Malé','slug'=>'male','country'=>'maldives','hero'=>'https://images.unsplash.com/photo-1506905925346-21bda4d32df4?w=1920','desc'=>'Discover Malé atoll\'s overwater villas, coral reefs and turquoise paradise.'),
+            // Nepal
+            array('name'=>'Kathmandu','slug'=>'kathmandu','country'=>'nepal','hero'=>'https://images.unsplash.com/photo-1605640840605-14ac1855827b?w=1920','desc'=>'Explore Kathmandu\'s temples, trekking trails and gateway to the Himalayas.'),
+            // Oman
+            array('name'=>'Muscat','slug'=>'muscat','country'=>'oman','hero'=>'https://images.unsplash.com/photo-1587474260584-136574528ed5?w=1920','desc'=>'Discover Muscat\'s Sultan Qaboos Grand Mosque, souqs and dramatic mountain scenery.'),
+            // Bahrain
+            array('name'=>'Manama','slug'=>'manama','country'=>'bahrain','hero'=>'https://images.unsplash.com/photo-1586724237569-f3d0c1dee8c6?w=1920','desc'=>'Explore Manama\'s pearl history, modern financial district and vibrant souqs.'),
+            // Kuwait
+            array('name'=>'Kuwait City','slug'=>'kuwait-city','country'=>'kuwait','hero'=>'https://images.unsplash.com/photo-1586724237569-f3d0c1dee8c6?w=1920','desc'=>'Discover Kuwait City\'s iconic water towers, grand mosque and Gulf heritage.'),
+            // Jordan
+            array('name'=>'Petra','slug'=>'petra','country'=>'jordan','hero'=>'https://images.unsplash.com/photo-1548013146-72479768bada?w=1920','desc'=>'Walk through the rose-red city of Petra, one of the New Seven Wonders of the World.'),
+            array('name'=>'Amman','slug'=>'amman','country'=>'jordan','hero'=>'https://images.unsplash.com/photo-1565492568403-bcb5f4c77c5f?w=1920','desc'=>'Explore Amman\'s ancient citadel, Roman theatre and vibrant modern culture.'),
+            array('name'=>'Wadi Rum','slug'=>'wadi-rum','country'=>'jordan','hero'=>'https://images.unsplash.com/photo-1587474260584-136574528ed5?w=1920','desc'=>'Camp under the stars in Wadi Rum\'s otherworldly red desert landscape.'),
+            // Israel
+            array('name'=>'Tel Aviv','slug'=>'tel-aviv','country'=>'israel','hero'=>'https://images.unsplash.com/photo-1565183997392-2f6f122e5912?w=1920','desc'=>'Experience Tel Aviv\'s beaches, vibrant nightlife and world-class dining scene.'),
+            array('name'=>'Jerusalem','slug'=>'jerusalem','country'=>'israel','hero'=>'https://images.unsplash.com/photo-1562979314-bee7453e911c?w=1920','desc'=>'Visit Jerusalem\'s holy sites, ancient walls and rich multicultural heritage.'),
+            // Turkey extended
+            array('name'=>'Antalya','slug'=>'antalya','country'=>'turkey','hero'=>'https://images.unsplash.com/photo-1568051243851-f9b136146e27?w=1920','desc'=>'Relax on Antalya\'s Mediterranean beaches and explore ancient Lycian ruins.'),
+            // Egypt extended
+            array('name'=>'Luxor','slug'=>'luxor','country'=>'egypt','hero'=>'https://images.unsplash.com/photo-1548013146-72479768bada?w=1920','desc'=>'Explore Luxor\'s Valley of the Kings, Karnak Temple and ancient Pharaonic wonders.'),
+            array('name'=>'Hurghada','slug'=>'hurghada','country'=>'egypt','hero'=>'https://images.unsplash.com/photo-1544551763-46a013bb70d5?w=1920','desc'=>'Dive into Hurghada\'s Red Sea coral reefs and enjoy beach resort life.'),
+            // Morocco extended
+            array('name'=>'Fes','slug'=>'fes','country'=>'morocco','hero'=>'https://images.unsplash.com/photo-1597212618440-806262de4f6b?w=1920','desc'=>'Get lost in Fes\' ancient medina, tanneries and medieval Islamic architecture.'),
+            // UK extended
+            array('name'=>'Manchester','slug'=>'manchester','country'=>'united-kingdom','hero'=>'https://images.unsplash.com/photo-1570145820259-b5b80c5c8bd6?w=1920','desc'=>'Explore Manchester\'s football culture, music heritage and industrial history.'),
+            // France extended
+            array('name'=>'Lyon','slug'=>'lyon','country'=>'france','hero'=>'https://images.unsplash.com/photo-1565073624497-7144969b8a8d?w=1920','desc'=>'Experience Lyon\'s UNESCO heritage, gastronomy and silk-weaving history.'),
+            // Italy extended
+            array('name'=>'Florence','slug'=>'florence','country'=>'italy','hero'=>'https://images.unsplash.com/photo-1541370976299-4d24be63f9cb?w=1920','desc'=>'Discover Renaissance art, the Uffizi and stunning architecture in Florence.'),
+            array('name'=>'Milan','slug'=>'milan','country'=>'italy','hero'=>'https://images.unsplash.com/photo-1596561859025-a5e63e3be22e?w=1920','desc'=>'Explore Milan\'s fashion, the Duomo, Last Supper and design culture.'),
+            array('name'=>'Naples','slug'=>'naples','country'=>'italy','hero'=>'https://images.unsplash.com/photo-1558685204-9bf0e2bc7cf0?w=1920','desc'=>'Experience Naples\' legendary pizza, Pompeii ruins and Bay of Naples views.'),
+            // Spain extended
+            array('name'=>'Seville','slug'=>'seville','country'=>'spain','hero'=>'https://images.unsplash.com/photo-1555993539-1732b0258235?w=1920','desc'=>'Experience Seville\'s flamenco, cathedral, Alcázar and Andalusian culture.'),
+            // Germany extended
+            array('name'=>'Munich','slug'=>'munich','country'=>'germany','hero'=>'https://images.unsplash.com/photo-1573843981267-be1999ff37cd?w=1920','desc'=>'Enjoy Oktoberfest, Neuschwanstein Castle and Bavarian culture in Munich.'),
+            array('name'=>'Berlin','slug'=>'berlin','country'=>'germany','hero'=>'https://images.unsplash.com/photo-1560969184-10fe8719e047?w=1920','desc'=>'Explore Berlin\'s history, art, music and vibrant contemporary culture.'),
+            // Netherlands
+            array('name'=>'Amsterdam','slug'=>'amsterdam','country'=>'netherlands','hero'=>'https://images.unsplash.com/photo-1512470876302-972faa2aa9a4?w=1920','desc'=>'Cycle through Amsterdam\'s canals, visit world-class museums and flower markets.'),
+            // Greece
+            array('name'=>'Athens','slug'=>'athens','country'=>'greece','hero'=>'https://images.unsplash.com/photo-1555993539-1732b0258235?w=1920','desc'=>'Walk through Athens\' Acropolis and explore ancient Greek civilisation.'),
+            array('name'=>'Santorini','slug'=>'santorini','country'=>'greece','hero'=>'https://images.unsplash.com/photo-1506929562872-bb421503ef21?w=1920','desc'=>'Experience Santorini\'s iconic blue-domed churches, caldera views and sunsets.'),
+            array('name'=>'Mykonos','slug'=>'mykonos','country'=>'greece','hero'=>'https://images.unsplash.com/photo-1601581875039-e899893d520c?w=1920','desc'=>'Discover Mykonos\' windmills, beach clubs and cosmopolitan island life.'),
+            // Portugal
+            array('name'=>'Lisbon','slug'=>'lisbon','country'=>'portugal','hero'=>'https://images.unsplash.com/photo-1548707309-dcebeab9ea9b?w=1920','desc'=>'Explore Lisbon\'s historic trams, fado music, castles and Atlantic coastline.'),
+            array('name'=>'Porto','slug'=>'porto','country'=>'portugal','hero'=>'https://images.unsplash.com/photo-1555881400-74d7acaacd8b?w=1920','desc'=>'Discover Porto\'s port wine cellars, azulejo tiles and scenic Douro riverfront.'),
+            // Switzerland extended
+            array('name'=>'Zurich','slug'=>'zurich','country'=>'switzerland','hero'=>'https://images.unsplash.com/photo-1521335629791-ce4aec67dd15?w=1920','desc'=>'Explore Zurich\'s lake, old town, art scene and alpine day trips.'),
+            array('name'=>'Interlaken','slug'=>'interlaken','country'=>'switzerland','hero'=>'https://images.unsplash.com/photo-1531366936337-7c912a4589a7?w=1920','desc'=>'Skydive, ski and adventure through Interlaken\'s Swiss Alps gateway.'),
+            array('name'=>'Geneva','slug'=>'geneva','country'=>'switzerland','hero'=>'https://images.unsplash.com/photo-1516426122078-c23e76319801?w=1920','desc'=>'Discover Geneva\'s Jet d\'Eau, UN headquarters and beautiful lake views.'),
+            // Austria
+            array('name'=>'Vienna','slug'=>'vienna','country'=>'austria','hero'=>'https://images.unsplash.com/photo-1516550893923-42d28e5677af?w=1920','desc'=>'Experience Vienna\'s imperial palaces, classical concerts and coffeehouse culture.'),
+            array('name'=>'Salzburg','slug'=>'salzburg','country'=>'austria','hero'=>'https://images.unsplash.com/photo-1589395595558-9da10ef0985d?w=1920','desc'=>'Explore Salzburg\'s Mozart birthplace, baroque fortress and Sound of Music trails.'),
+            // Czech Republic
+            array('name'=>'Prague','slug'=>'prague','country'=>'czech-republic','hero'=>'https://images.unsplash.com/photo-1541849546-216549ae216d?w=1920','desc'=>'Wander Prague\'s Gothic castle, Charles Bridge and UNESCO old town.'),
+            // Hungary
+            array('name'=>'Budapest','slug'=>'budapest','country'=>'hungary','hero'=>'https://images.unsplash.com/photo-1541343672885-9be56236302a?w=1920','desc'=>'Soak in Budapest\'s thermal baths, Danube views and stunning parliament building.'),
+            // Belgium
+            array('name'=>'Brussels','slug'=>'brussels','country'=>'belgium','hero'=>'https://images.unsplash.com/photo-1587491439149-bd2ff295d450?w=1920','desc'=>'Discover Brussels\' Grand Place, waffles, chocolate and European history.'),
+            // Croatia
+            array('name'=>'Dubrovnik','slug'=>'dubrovnik','country'=>'croatia','hero'=>'https://images.unsplash.com/photo-1555993539-1732b0258235?w=1920','desc'=>'Walk Dubrovnik\'s medieval walls and enjoy the Adriatic\'s Pearl of the Sea.'),
+            // Iceland
+            array('name'=>'Reykjavik','slug'=>'reykjavik','country'=>'iceland','hero'=>'https://images.unsplash.com/photo-1504893524553-b855bce32c67?w=1920','desc'=>'Chase Northern Lights from Reykjavik and explore Iceland\'s volcanic wonders.'),
+            // Norway
+            array('name'=>'Oslo','slug'=>'oslo','country'=>'norway','hero'=>'https://images.unsplash.com/photo-1513519245088-0e12902e5a38?w=1920','desc'=>'Explore Oslo\'s Viking ships, fjord views and modern Nordic architecture.'),
+            array('name'=>'Bergen','slug'=>'bergen','country'=>'norway','hero'=>'https://images.unsplash.com/photo-1513519245088-0e12902e5a38?w=1920','desc'=>'Discover Bergen\'s UNESCO wharf, gateway to Norway\'s most spectacular fjords.'),
+            // Sweden
+            array('name'=>'Stockholm','slug'=>'stockholm','country'=>'sweden','hero'=>'https://images.unsplash.com/photo-1509356843151-3e7d96241e11?w=1920','desc'=>'Explore Stockholm\'s archipelago, Gamla Stan old town and Vasa museum.'),
+            // Denmark
+            array('name'=>'Copenhagen','slug'=>'copenhagen','country'=>'denmark','hero'=>'https://images.unsplash.com/photo-1513622470522-26c3c8a854bc?w=1920','desc'=>'Cycle through Copenhagen\'s Nyhavn harbour, Tivoli Gardens and design museums.'),
+            // Finland
+            array('name'=>'Helsinki','slug'=>'helsinki','country'=>'finland','hero'=>'https://images.unsplash.com/photo-1559638753-d3082b54b3ba?w=1920','desc'=>'Discover Helsinki\'s design district, island fortress and sauna culture.'),
+            // Poland
+            array('name'=>'Kraków','slug'=>'krakow','country'=>'poland','hero'=>'https://images.unsplash.com/photo-1541424524748-bbe0a3f72e63?w=1920','desc'=>'Visit Kraków\'s Wawel Castle, Jewish Quarter and the Auschwitz memorial.'),
+            // Ireland
+            array('name'=>'Dublin','slug'=>'dublin','country'=>'ireland','hero'=>'https://images.unsplash.com/photo-1551443011-bc5ae8264c86?w=1920','desc'=>'Experience Dublin\'s Georgian architecture, Guinness Storehouse and Irish pub culture.'),
+            // Africa
+            array('name'=>'Nairobi','slug'=>'nairobi','country'=>'kenya','hero'=>'https://images.unsplash.com/photo-1547471080-7cc2caa01a7e?w=1920','desc'=>'Use Nairobi as your safari base camp to explore Kenya\'s spectacular wildlife.'),
+            array('name'=>'Masai Mara','slug'=>'masai-mara','country'=>'kenya','hero'=>'https://images.unsplash.com/photo-1547471080-7cc2caa01a7e?w=1920','desc'=>'Witness the Great Migration in the world-famous Masai Mara reserve.'),
+            array('name'=>'Cape Town','slug'=>'cape-town','country'=>'south-africa','hero'=>'https://images.unsplash.com/photo-1580060839134-75a5edca2e99?w=1920','desc'=>'Explore Table Mountain, Cape Winelands and breathtaking coastal scenery.'),
+            array('name'=>'Johannesburg','slug'=>'johannesburg','country'=>'south-africa','hero'=>'https://images.unsplash.com/photo-1555636222-cae831e670b3?w=1920','desc'=>'Discover Johannesburg\'s Soweto, Apartheid Museum and vibrant arts scene.'),
+            array('name'=>'Zanzibar','slug'=>'zanzibar','country'=>'tanzania','hero'=>'https://images.unsplash.com/photo-1547471080-7cc2caa01a7e?w=1920','desc'=>'Discover Zanzibar\'s Stone Town, spice tours and pristine Indian Ocean beaches.'),
+            array('name'=>'Tunis','slug'=>'tunis','country'=>'tunisia','hero'=>'https://images.unsplash.com/photo-1587474260584-136574528ed5?w=1920','desc'=>'Explore the ancient medina, Carthage ruins and blue streets of Sidi Bou Said.'),
+            // Americas
+            array('name'=>'New York City','slug'=>'new-york-city','country'=>'united-states','hero'=>'https://images.unsplash.com/photo-1496442226666-8d4d0e62e6e9?w=1920','desc'=>'Experience Times Square, Central Park, Empire State Building and world-class culture.'),
+            array('name'=>'Los Angeles','slug'=>'los-angeles','country'=>'united-states','hero'=>'https://images.unsplash.com/photo-1534190760961-74e8c1c5c3da?w=1920','desc'=>'Visit Hollywood, Santa Monica beach, Disneyland and LA\'s film culture.'),
+            array('name'=>'Las Vegas','slug'=>'las-vegas','country'=>'united-states','hero'=>'https://images.unsplash.com/photo-1581351721010-8cf859cb14a4?w=1920','desc'=>'Experience the Strip, show entertainment, Grand Canyon day trips and Vegas nightlife.'),
+            array('name'=>'Miami','slug'=>'miami','country'=>'united-states','hero'=>'https://images.unsplash.com/photo-1503891450247-ee5f8ec46dc3?w=1920','desc'=>'Enjoy Miami\'s South Beach, Art Deco history, Cuban culture and nightlife.'),
+            array('name'=>'Orlando','slug'=>'orlando','country'=>'united-states','hero'=>'https://images.unsplash.com/photo-1534190760961-74e8c1c5c3da?w=1920','desc'=>'Visit Walt Disney World, Universal Studios and all Orlando\'s epic theme parks.'),
+            array('name'=>'San Francisco','slug'=>'san-francisco','country'=>'united-states','hero'=>'https://images.unsplash.com/photo-1501594907352-04cda38ebc29?w=1920','desc'=>'Cross the Golden Gate Bridge and explore SF\'s tech culture, Alcatraz and hills.'),
+            array('name'=>'Vancouver','slug'=>'vancouver','country'=>'canada','hero'=>'https://images.unsplash.com/photo-1559494007-9f5847c49d94?w=1920','desc'=>'Discover Vancouver\'s mountains, Stanley Park and vibrant multicultural food scene.'),
+            array('name'=>'Toronto','slug'=>'toronto','country'=>'canada','hero'=>'https://images.unsplash.com/photo-1507992781348-310259076fe0?w=1920','desc'=>'Explore Toronto\'s CN Tower, diverse neighbourhoods and Niagara Falls day trips.'),
+            array('name'=>'Mexico City','slug'=>'mexico-city','country'=>'mexico','hero'=>'https://images.unsplash.com/photo-1518105779142-d975f22f1b0a?w=1920','desc'=>'Discover Mexico City\'s Aztec ruins, murals, markets and world-famous cuisine.'),
+            array('name'=>'Cancún','slug'=>'cancun','country'=>'mexico','hero'=>'https://images.unsplash.com/photo-1553697388-85af47c38e62?w=1920','desc'=>'Relax on Cancún\'s white beaches, snorkel in cenotes and explore Mayan ruins.'),
+            array('name'=>'Lima','slug'=>'lima','country'=>'peru','hero'=>'https://images.unsplash.com/photo-1576547553527-89e4e2dba62c?w=1920','desc'=>'Discover Lima\'s culinary scene, Miraflores cliffs and gateway to Machu Picchu.'),
+            array('name'=>'Cusco','slug'=>'cusco','country'=>'peru','hero'=>'https://images.unsplash.com/photo-1536066416923-c249d18de0d8?w=1920','desc'=>'Explore Cusco\'s Inca heritage and use it as a base for Machu Picchu.'),
+            array('name'=>'Rio de Janeiro','slug'=>'rio-de-janeiro','country'=>'brazil','hero'=>'https://images.unsplash.com/photo-1483729558449-99ef09a8c325?w=1920','desc'=>'Experience Christ the Redeemer, Copacabana beach, Carnival and the Sugar Loaf.'),
+            array('name'=>'Buenos Aires','slug'=>'buenos-aires','country'=>'argentina','hero'=>'https://images.unsplash.com/photo-1612294037637-ec328d0e075e?w=1920','desc'=>'Dance the tango, visit colourful La Boca and enjoy BA\'s legendary steakhouses.'),
+            array('name'=>'Cartagena','slug'=>'cartagena','country'=>'colombia','hero'=>'https://images.unsplash.com/photo-1537996194471-e657df975ab4?w=1920','desc'=>'Stroll Cartagena\'s walled colonial city and relax on Caribbean beaches.'),
+            array('name'=>'Santiago','slug'=>'santiago','country'=>'chile','hero'=>'https://images.unsplash.com/photo-1545158535-c3f7168c28b6?w=1920','desc'=>'Discover Santiago\'s Andean backdrop, wine culture and vibrant urban life.'),
+            // Oceania
+            array('name'=>'Sydney','slug'=>'sydney','country'=>'australia','hero'=>'https://images.unsplash.com/photo-1506973035872-a4ec16b8e8d9?w=1920','desc'=>'Visit the Opera House, Harbour Bridge, Bondi Beach and harbour cruises.'),
+            array('name'=>'Melbourne','slug'=>'melbourne','country'=>'australia','hero'=>'https://images.unsplash.com/photo-1582985400667-0d37d9d8c6b7?w=1920','desc'=>'Explore Melbourne\'s laneways, coffee culture, sports venues and arts scene.'),
+            array('name'=>'Cairns','slug'=>'cairns','country'=>'australia','hero'=>'https://images.unsplash.com/photo-1559494007-9f5847c49d94?w=1920','desc'=>'Dive the Great Barrier Reef, rainforest zip-lines and Daintree National Park.'),
+            array('name'=>'Auckland','slug'=>'auckland','country'=>'new-zealand','hero'=>'https://images.unsplash.com/photo-1507699622108-4be3abd695ad?w=1920','desc'=>'Explore Auckland\'s Sky Tower, harbour islands and gateway to New Zealand.'),
+            array('name'=>'Queenstown','slug'=>'queenstown','country'=>'new-zealand','hero'=>'https://images.unsplash.com/photo-1558441440-d4111d18d48f?w=1920','desc'=>'Bungee jump, skydive and ski in Queenstown, the adventure capital of the world.'),
         );
         
         foreach ($cities as $city) {

@@ -183,7 +183,10 @@ class FTH_Admin_Settings {
         if (!current_user_can('manage_options')) {
             return;
         }
-        
+
+        // Load WP media uploader
+        wp_enqueue_media();
+
         // Save message
         if (isset($_GET['settings-updated'])) {
             add_settings_error('fth_messages', 'fth_message', 'Settings saved successfully.', 'updated');
@@ -380,6 +383,75 @@ class FTH_Admin_Settings {
                 </div>
                 
                 <div class="fth-settings-section">
+                    <h2>🖼️ Hero Images</h2>
+                    <p class="description">Customize the hero banner of each main hub page. Use the "Choose Image" button to pick from your WordPress media library, or paste any URL directly.</p>
+
+                    <table class="form-table">
+                        <tr>
+                            <th scope="row" colspan="2"><strong>🎟️ Tours &amp; Attractions page (/things-to-do/)</strong></th>
+                        </tr>
+                        <tr>
+                            <th scope="row"><label for="fth_things_hero_title">Title</label></th>
+                            <td>
+                                <input type="text" id="fth_things_hero_title" name="fth_things_hero_title" value="<?php echo esc_attr($things_hero_title); ?>" class="large-text">
+                            </td>
+                        </tr>
+                        <tr>
+                            <th scope="row"><label for="fth_things_hero_subtitle">Subtitle</label></th>
+                            <td>
+                                <textarea id="fth_things_hero_subtitle" name="fth_things_hero_subtitle" class="large-text" rows="2"><?php echo esc_textarea($things_hero_subtitle); ?></textarea>
+                            </td>
+                        </tr>
+                        <tr>
+                            <th scope="row"><label for="fth_things_hero_image">Hero Image</label></th>
+                            <td>
+                                <div style="display:flex;align-items:center;gap:10px;flex-wrap:wrap;">
+                                    <input type="url" id="fth_things_hero_image" name="fth_things_hero_image" value="<?php echo esc_url($things_hero_image); ?>" class="large-text fth-image-url" style="flex:1;min-width:260px;">
+                                    <button type="button" class="button fth-media-btn" data-target="#fth_things_hero_image" data-preview="#fth_things_hero_preview">Choose Image</button>
+                                </div>
+                                <?php if ($things_hero_image): ?>
+                                <img id="fth_things_hero_preview" src="<?php echo esc_url($things_hero_image); ?>" style="max-width:320px;max-height:80px;object-fit:cover;border-radius:6px;margin-top:8px;display:block;">
+                                <?php else: ?>
+                                <img id="fth_things_hero_preview" src="" style="max-width:320px;max-height:80px;object-fit:cover;border-radius:6px;margin-top:8px;display:none;">
+                                <?php endif; ?>
+                                <p class="description">Recommended: at least 1920×600px. Unsplash URLs work fine.</p>
+                            </td>
+                        </tr>
+                        <tr>
+                            <th scope="row" colspan="2"><strong>🏨 Hotels page (/hotels/)</strong></th>
+                        </tr>
+                        <tr>
+                            <th scope="row"><label for="fth_hotels_hero_title">Title</label></th>
+                            <td>
+                                <input type="text" id="fth_hotels_hero_title" name="fth_hotels_hero_title" value="<?php echo esc_attr($hotels_hero_title); ?>" class="large-text">
+                            </td>
+                        </tr>
+                        <tr>
+                            <th scope="row"><label for="fth_hotels_hero_subtitle">Subtitle</label></th>
+                            <td>
+                                <textarea id="fth_hotels_hero_subtitle" name="fth_hotels_hero_subtitle" class="large-text" rows="2"><?php echo esc_textarea($hotels_hero_subtitle); ?></textarea>
+                            </td>
+                        </tr>
+                        <tr>
+                            <th scope="row"><label for="fth_hotels_hero_image">Hero Image</label></th>
+                            <td>
+                                <div style="display:flex;align-items:center;gap:10px;flex-wrap:wrap;">
+                                    <input type="url" id="fth_hotels_hero_image" name="fth_hotels_hero_image" value="<?php echo esc_url($hotels_hero_image); ?>" class="large-text fth-image-url" style="flex:1;min-width:260px;">
+                                    <button type="button" class="button fth-media-btn" data-target="#fth_hotels_hero_image" data-preview="#fth_hotels_hero_preview">Choose Image</button>
+                                </div>
+                                <?php if ($hotels_hero_image): ?>
+                                <img id="fth_hotels_hero_preview" src="<?php echo esc_url($hotels_hero_image); ?>" style="max-width:320px;max-height:80px;object-fit:cover;border-radius:6px;margin-top:8px;display:block;">
+                                <?php else: ?>
+                                <img id="fth_hotels_hero_preview" src="" style="max-width:320px;max-height:80px;object-fit:cover;border-radius:6px;margin-top:8px;display:none;">
+                                <?php endif; ?>
+                                <p class="description">Recommended: at least 1920×600px. Unsplash URLs work fine.</p>
+                            </td>
+                        </tr>
+                    </table>
+                    <p class="description" style="margin-top:8px;">💡 <strong>City hero images</strong> are set individually: go to <a href="<?php echo admin_url('edit-tags.php?taxonomy=travel_city&post_type=travel_activity'); ?>">Travel Hub → Cities</a>, click Edit on any city, and use the "Choose Image" button on the Hero Image field.</p>
+                </div>
+
+                <div class="fth-settings-section">
                     <h2>Tools</h2>
                     
                     <table class="form-table">
@@ -401,6 +473,23 @@ class FTH_Admin_Settings {
                                 <p class="description">Re-run the initial data seeding if you need to restore default taxonomies</p>
                             </td>
                         </tr>
+                        <tr>
+                            <th scope="row">Reapply SEO (AIOSEO)</th>
+                            <td>
+                                <button type="button" id="fth-reapply-seo-activities" class="button button-primary">
+                                    ♻ Reapply SEO to All Activities
+                                </button>
+                                &nbsp;
+                                <button type="button" id="fth-reapply-seo-hotels" class="button button-primary">
+                                    ♻ Reapply SEO to All Hotels
+                                </button>
+                                <div id="fth-seo-progress" style="margin-top:8px;display:none;">
+                                    <span id="fth-seo-progress-msg" style="font-style:italic;color:#555;"></span>
+                                    <progress id="fth-seo-progress-bar" value="0" max="100" style="width:200px;margin-left:12px;vertical-align:middle;"></progress>
+                                </div>
+                                <p class="description">Re-generate all AIOSEO title, meta description, focus keyphrase and OG data for every published post. Run this after updating the plugin or after bulk imports.</p>
+                            </td>
+                        </tr>
                     </table>
                 </div>
                 
@@ -414,14 +503,90 @@ class FTH_Admin_Settings {
             $('#fth_primary_color').on('input', function() {
                 $('#fth_primary_color_text').val($(this).val());
             });
-            
+
             $('#fth_primary_color_text').on('input', function() {
                 var val = $(this).val();
                 if (/^#[0-9A-Fa-f]{6}$/.test(val)) {
                     $('#fth_primary_color').val(val);
                 }
             });
+
+            // WP Media Picker for hero images
+            $(document).on('click', '.fth-media-btn', function(e) {
+                e.preventDefault();
+                var $btn    = $(this);
+                var target  = $btn.data('target');
+                var preview = $btn.data('preview');
+                var frame = wp.media({
+                    title:    'Select Hero Image',
+                    button:   { text: 'Use this image' },
+                    multiple: false,
+                    library:  { type: 'image' }
+                });
+                frame.on('select', function() {
+                    var attachment = frame.state().get('selection').first().toJSON();
+                    $(target).val(attachment.url);
+                    $(preview).attr('src', attachment.url).show();
+                });
+                frame.open();
+            });
+
+            // Update preview when URL is typed manually
+            $(document).on('input', '.fth-image-url', function() {
+                var previewId = $(this).attr('id') + '_preview';
+                var url = $(this).val();
+                if (url) { $('#' + previewId).attr('src', url).show(); }
+                else     { $('#' + previewId).hide(); }
+            });
             
+            // Bulk reapply SEO helper
+            function fthRunSeoReapply(type, paged, totalPages) {
+                var $msg = $('#fth-seo-progress-msg');
+                var $bar = $('#fth-seo-progress-bar');
+                $msg.text('Processing ' + type + ' (page ' + paged + '/' + (totalPages || '?') + ')…');
+                $.post(ajaxurl, {
+                    action: 'fth_bulk_reapply_seo',
+                    nonce: '<?php echo wp_create_nonce('fth_admin_nonce'); ?>',
+                    type: type,
+                    paged: paged
+                }, function(response) {
+                    if (response.success) {
+                        var d = response.data;
+                        var pct = d.total_pages > 0 ? Math.round((d.paged / d.total_pages) * 100) : 100;
+                        $bar.val(pct);
+                        $msg.text(d.message);
+                        if (!d.done) {
+                            fthRunSeoReapply(type, paged + 1, d.total_pages);
+                        } else {
+                            $msg.text('✅ Done! All ' + type + ' SEO data updated.');
+                            $('#fth-reapply-seo-activities, #fth-reapply-seo-hotels').prop('disabled', false);
+                        }
+                    } else {
+                        $msg.text('❌ Error: ' + (response.data ? response.data.message : 'unknown'));
+                        $('#fth-reapply-seo-activities, #fth-reapply-seo-hotels').prop('disabled', false);
+                    }
+                }).fail(function() {
+                    $msg.text('❌ Network error. Please try again.');
+                    $('#fth-reapply-seo-activities, #fth-reapply-seo-hotels').prop('disabled', false);
+                });
+            }
+            $('#fth-reapply-seo-activities').on('click', function() {
+                if (!confirm('This will rewrite AIOSEO data for ALL published activities. Continue?')) return;
+                $(this).prop('disabled', true);
+                $('#fth-reapply-seo-hotels').prop('disabled', true);
+                $('#fth-seo-progress').show();
+                $('#fth-seo-progress-bar').val(0);
+                fthRunSeoReapply('activities', 1, 0);
+            });
+            $('#fth-reapply-seo-hotels').on('click', function() {
+                if (!confirm('This will rewrite AIOSEO data for ALL published hotels. Continue?')) return;
+                $(this).prop('disabled', true);
+                $('#fth-reapply-seo-activities').prop('disabled', true);
+                $('#fth-seo-progress').show();
+                $('#fth-seo-progress-bar').val(0);
+                fthRunSeoReapply('hotels', 1, 0);
+            });
+
             // Re-seed button
             $('#fth-reseed-data').on('click', function() {
                 if (confirm('This will re-add any missing countries, cities, and categories. Continue?')) {
