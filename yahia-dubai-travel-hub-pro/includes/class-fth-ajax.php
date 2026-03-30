@@ -356,6 +356,28 @@ private static function fetch_klook_html($url) {
         $hotel_id = (int) $m[1];
     }
 
+    // Helper: drill through common API wrappers to find actual payload
+    // Klook APIs often return {"result": {"code": 0, "data": {...real_data...}}}
+    // or {"code": 0, "data": {...real_data...}} or {"data": {...real_data...}}
+    $extract_api_payload = function($api_data) {
+        if (!is_array($api_data)) return null;
+        // Try common wrapper paths, deepest first
+        $candidates = array();
+        if (isset($api_data['result']['data']))  $candidates[] = $api_data['result']['data'];
+        if (isset($api_data['result']))          $candidates[] = $api_data['result'];
+        if (isset($api_data['data']['data']))    $candidates[] = $api_data['data']['data'];
+        if (isset($api_data['data']))            $candidates[] = $api_data['data'];
+        $candidates[] = $api_data;
+        foreach ($candidates as $c) {
+            if (is_array($c) && count($c) >= 3) return $c; // need at least 3 keys to be meaningful
+        }
+        // Relax: accept 2+ keys
+        foreach ($candidates as $c) {
+            if (is_array($c) && count($c) >= 2) return $c;
+        }
+        return null;
+    };
+
     if ($act_id) {
         $api_endpoints = array(
             'https://www.klook.com/v1/activityDetail/getActivityInfo/?activity_id=' . $act_id . '&currency=USD&language=en-US',
@@ -368,24 +390,29 @@ private static function fetch_klook_html($url) {
                 'Accept-Language' => 'en-US,en;q=0.9',
                 'Origin'          => 'https://www.klook.com',
                 'Referer'         => 'https://www.klook.com/',
+                'X-Requested-With' => 'XMLHttpRequest',
             )));
             if (is_wp_error($api_r)) continue;
             $api_body = wp_remote_retrieve_body($api_r);
             if (empty($api_body)) continue;
             $api_data = json_decode($api_body, true);
-            if (!is_array($api_data)) continue;
-            // Accept if data has meaningful content (result, data, or activity key)
-            $inner = isset($api_data['result']) ? $api_data['result']
-                   : (isset($api_data['data'])   ? $api_data['data'] : $api_data);
-            if (empty($inner) || (is_array($inner) && count($inner) < 2)) continue;
-            // Wrap as synthetic __NEXT_DATA__ so parse_klook_html works unchanged
-            $synth_data = array(
-                'props' => array('pageProps' => array(
+            $inner = $extract_api_payload($api_data);
+            if (!$inner) continue;
+
+            // Put data in MULTIPLE places so the parser always finds it:
+            // 1. In dehydratedState.queries (primary path for modern Klook pages)
+            // 2. Directly in pageProps (fallback if dehydratedState parsing misses it)
+            $page_props = array_merge(
+                $inner,  // keys directly at pageProps level (highest priority fallback)
+                array(
                     'dehydratedState' => array('queries' => array(array(
                         'queryHash' => '["getActivityDetail",{"activityId":' . $act_id . '}]',
                         'state'     => array('data' => $inner),
                     ))),
-                )),
+                )
+            );
+            $synth_data = array(
+                'props' => array('pageProps' => $page_props),
                 'query' => array('activityId' => $act_id),
             );
             $synth_html = '<html><head></head><body>'
@@ -405,22 +432,26 @@ private static function fetch_klook_html($url) {
                 'Accept-Language' => 'en-US,en;q=0.9',
                 'Origin'          => 'https://www.klook.com',
                 'Referer'         => 'https://www.klook.com/',
+                'X-Requested-With' => 'XMLHttpRequest',
             )));
             if (is_wp_error($api_r)) continue;
             $api_body = wp_remote_retrieve_body($api_r);
             if (empty($api_body)) continue;
             $api_data = json_decode($api_body, true);
-            if (!is_array($api_data)) continue;
-            $inner = isset($api_data['result']) ? $api_data['result']
-                   : (isset($api_data['data'])   ? $api_data['data'] : $api_data);
-            if (empty($inner) || (is_array($inner) && count($inner) < 2)) continue;
-            $synth_data = array(
-                'props' => array('pageProps' => array(
+            $inner = $extract_api_payload($api_data);
+            if (!$inner) continue;
+
+            $page_props = array_merge(
+                $inner,
+                array(
                     'dehydratedState' => array('queries' => array(array(
                         'queryHash' => '["getHotelDetail",{"hotelId":' . $hotel_id . '}]',
                         'state'     => array('data' => $inner),
                     ))),
-                )),
+                )
+            );
+            $synth_data = array(
+                'props' => array('pageProps' => $page_props),
                 'query' => array('hotelId' => $hotel_id),
             );
             $synth_html = '<html><head></head><body>'
@@ -5336,13 +5367,17 @@ if ($next_data_raw !== '') {
                     if ($qid === (string) $activity_id) $matched_id = $qid;
                 }
 
+                // Show raw top-level keys so we can see what the API actually returned
+                $raw_keys = is_array($qdata) ? array_keys($qdata) : array();
                 // Sample a few key values from this query
                 $sample = array(
-                    'title'       => (string) self::array_find_first($qdata, array('seoTitle','activity_name','activityName','name','title')),
-                    'description' => substr((string) self::array_find_first($qdata, array('activity_intro','activityIntro','intro','description','seoDescription')), 0, 100),
-                    'price'       => (string) self::array_find_first($qdata, array('min_price','sell_price','sellPrice','fromPrice','price')),
-                    'image'       => (string) self::array_find_first($qdata, array('cover_img_url','img_url','coverImageUrl','imageUrl','image')),
-                    'faq_count'   => (string) count((array) self::array_find_first($qdata, array('faq_list','faq','faqs','faqList'))),
+                    'raw_keys'    => implode(', ', array_slice($raw_keys, 0, 30)),
+                    'title'       => (string) self::array_find_first($qdata, array('seoTitle','activity_name','activityName','productName','name','title')),
+                    'description' => substr((string) self::array_find_first($qdata, array('activity_intro','activityIntro','intro','introduction','description','seoDescription')), 0, 120),
+                    'price'       => (string) self::array_find_first($qdata, array('min_price','from_price','sell_price','sellPrice','fromPrice','minSellingPrice','salePrice','lowestPrice','price')),
+                    'image'       => (string) self::array_find_first($qdata, array('cover_img_url','img_url','coverImageUrl','imageUrl','image','coverImage','cover_image')),
+                    'highlights'  => substr((string) self::array_find_first($qdata, array('highlight_list','highlights','activityHighlights','keyHighlights')), 0, 80),
+                    'faq_count'   => (string) count((array) self::array_find_first($qdata, array('faq_list','faq','faqs','faqList','activityFaq'))),
                 );
 
                 $role = 'supplement';
