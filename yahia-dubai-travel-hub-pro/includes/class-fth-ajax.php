@@ -423,20 +423,23 @@ private static function discover_klook_urls_via_cdx($type, $city_slug, $limit = 
     if (empty($city_slug)) return array();
 
     if ($type === 'hotel') {
-        // Hotel URLs always contain the city slug: /en-US/hotels/{city}/hotel/{id}-{slug}/
-        $pattern  = 'www.klook.com/*/hotels/' . $city_slug . '/hotel/*';
-        $match_type = 'prefix'; // won't work with * in middle; use domain match
-        // Use domain + path prefix trick via filter
+        // Modern Klook hotel URLs: /en-US/hotels/{id}-{hotel-slug}/
+        // Scan all /en-US/hotels/ URLs and filter by city_slug appearing anywhere in the URL
         $q = http_build_query(array(
-            'url'        => 'www.klook.com/en-US/hotels/' . $city_slug . '/hotel/',
+            'url'        => 'www.klook.com/en-US/hotels/',
             'output'     => 'json',
             'fl'         => 'original',
-            'filter'     => 'statuscode:200',
             'collapse'   => 'urlkey',
-            'limit'      => min($limit + 50, 300),
+            'limit'      => min($limit + 100, 400),
             'matchType'  => 'prefix',
-            'from'       => date('Ymd', strtotime('-2 years')),
+            'from'       => date('Ymd', strtotime('-3 years')),
         ));
+        // Filter: must be a single-hotel URL (has numeric ID) and contain city slug
+        $q .= '&filter=statuscode:200';
+        $q .= '&filter=original:.*hotels%2F[0-9].*';
+        if ($city_slug) {
+            $q .= '&filter=original:.*' . rawurlencode($city_slug) . '.*';
+        }
     } else {
         // Activity URLs: /en-US/activity/{id}-{slug-containing-city}/
         // Use CDX with city slug filter on the original URL
@@ -466,7 +469,8 @@ private static function discover_klook_urls_via_cdx($type, $city_slug, $limit = 
         if (!preg_match('#^https?://#', $u)) $u = 'https://' . $u;
         // Must be a single activity/hotel page, not a listing
         if ($type === 'activity' && !preg_match('#/activity/\d+-#', $u)) continue;
-        if ($type === 'hotel'    && !preg_match('#/hotel/\d+-#', $u))    continue;
+        // Hotels: accept both old /hotel/XXXX- and new /hotels/XXXX- formats
+        if ($type === 'hotel' && !preg_match('#/hotels?/(?:detail/)?\d+[/-]#i', $u)) continue;
         // For activities: confirm city slug present
         if ($type === 'activity' && stripos($u, $city_slug) === false) continue;
         // Normalise to /en-US/

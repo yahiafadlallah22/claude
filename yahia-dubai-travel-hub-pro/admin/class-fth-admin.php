@@ -678,46 +678,64 @@ class FTH_Admin {
             wp_send_json_error(array('message' => 'Unauthorized'));
         }
 
-        $do_activities = !empty($_POST['activities']);
-        $do_hotels     = !empty($_POST['hotels']);
-        $do_media      = !empty($_POST['media']);
-
+        $do_activities   = !empty($_POST['activities']);
+        $do_hotels       = !empty($_POST['hotels']);
+        $do_media        = !empty($_POST['media']);
         $do_destinations = !empty($_POST['destinations']);
         $do_terms        = !empty($_POST['terms']);
+        $batch_key       = isset($_POST['batch_key']) ? sanitize_text_field($_POST['batch_key']) : '';
+        $batch_offset    = isset($_POST['batch_offset']) ? max(0, intval($_POST['batch_offset'])) : 0;
+        $batch_size      = 80; // posts per AJAX call — safe for any server
 
         if (!$do_activities && !$do_hotels && !$do_destinations && !$do_terms) {
             wp_send_json_error(array('message' => 'Nothing selected.'));
         }
 
-        // Extend PHP execution time for large datasets
-        if (function_exists('set_time_limit')) @set_time_limit(600);
-        if (function_exists('ignore_user_abort')) @ignore_user_abort(true);
+        if (function_exists('set_time_limit')) @set_time_limit(120);
 
-        $post_types = array();
-        if ($do_activities) $post_types[] = 'travel_activity';
-        if ($do_hotels)     $post_types[] = 'travel_hotel';
+        // On first call (offset=0): collect all IDs and store in transient
+        if ($batch_offset === 0 || empty($batch_key)) {
+            $post_types = array();
+            if ($do_activities)  $post_types[] = 'travel_activity';
+            if ($do_hotels)      $post_types[] = 'travel_hotel';
+            if ($do_destinations) $post_types[] = 'travel_destination';
 
-        $posts = array();
-        if (!empty($post_types)) {
-            $posts = get_posts(array(
-                'post_type'      => $post_types,
-                'post_status'    => 'any',
-                'posts_per_page' => -1,
-                'fields'         => 'ids',
-            ));
+            $all_ids = array();
+            if (!empty($post_types)) {
+                $all_ids = get_posts(array(
+                    'post_type'      => $post_types,
+                    'post_status'    => 'any',
+                    'posts_per_page' => -1,
+                    'fields'         => 'ids',
+                    'no_found_rows'  => true,
+                ));
+            }
+            $batch_key = 'fth_del_' . wp_generate_password(12, false);
+            set_transient($batch_key, array(
+                'ids'    => array_map('intval', (array) $all_ids),
+                'media'  => $do_media,
+                'terms'  => $do_terms,
+            ), 3600);
+            $batch_offset = 0;
         }
+
+        $stored = get_transient($batch_key);
+        if (!$stored) {
+            wp_send_json_error(array('message' => 'Session expirée. Veuillez recommencer.'));
+        }
+
+        $all_ids  = $stored['ids'];
+        $do_media = $stored['media'];
+        $do_terms = $stored['terms'];
+        $total    = count($all_ids);
+        $batch    = array_slice($all_ids, $batch_offset, $batch_size);
 
         $deleted = 0;
         $media_deleted = 0;
-        foreach ((array) $posts as $post_id) {
+        foreach ($batch as $post_id) {
             if ($do_media) {
-                // Delete thumbnail
                 $thumb_id = (int) get_post_thumbnail_id($post_id);
-                if ($thumb_id) {
-                    wp_delete_attachment($thumb_id, true);
-                    $media_deleted++;
-                }
-                // Delete gallery attachments
+                if ($thumb_id) { wp_delete_attachment($thumb_id, true); $media_deleted++; }
                 $gallery_ids = array_filter(array_map('intval', explode(',', (string) get_post_meta($post_id, '_fth_gallery', true))));
                 $tracked_ids = array_filter(array_map('intval', explode(',', (string) get_post_meta($post_id, '_fth_imported_attachment_ids', true))));
                 foreach (array_unique(array_merge($gallery_ids, $tracked_ids)) as $aid) {
@@ -728,37 +746,36 @@ class FTH_Admin {
             $deleted++;
         }
 
-        // Nuclear option: also delete destinations and all taxonomy terms
+        $next_offset = $batch_offset + $batch_size;
+        $done_posts  = ($next_offset >= $total);
+
+        // Delete terms on the last batch
         $terms_deleted = 0;
-        if ($do_destinations) {
-            $dest_posts = get_posts(array('post_type' => 'travel_destination', 'post_status' => 'any', 'posts_per_page' => -1, 'fields' => 'ids'));
-            foreach ((array) $dest_posts as $dp_id) {
-                if ($do_media) {
-                    $t_id = (int) get_post_thumbnail_id($dp_id);
-                    if ($t_id) { wp_delete_attachment($t_id, true); $media_deleted++; }
-                }
-                wp_delete_post($dp_id, true);
-                $deleted++;
-            }
-        }
-        if ($do_terms) {
+        if ($done_posts && $do_terms) {
             foreach (array('travel_city', 'travel_country', 'travel_category') as $tax) {
                 $all_terms = get_terms(array('taxonomy' => $tax, 'hide_empty' => false, 'fields' => 'ids'));
                 if (!is_wp_error($all_terms)) {
-                    foreach ((array) $all_terms as $tid) {
-                        wp_delete_term((int) $tid, $tax);
-                        $terms_deleted++;
-                    }
+                    foreach ((array) $all_terms as $tid) { wp_delete_term((int) $tid, $tax); $terms_deleted++; }
                 }
             }
+            delete_transient($batch_key);
         }
 
-        $msg = 'Deleted ' . $deleted . ' post(s)';
-        if ($do_media) $msg .= ' and ' . $media_deleted . ' media file(s)';
-        if ($do_terms) $msg .= ' and ' . $terms_deleted . ' taxonomy term(s)';
-        $msg .= '.';
+        $done = $done_posts;
 
-        wp_send_json_success(array('message' => $msg, 'deleted' => $deleted, 'media_deleted' => $media_deleted, 'terms_deleted' => $terms_deleted));
+        wp_send_json_success(array(
+            'done'          => $done,
+            'batch_key'     => $batch_key,
+            'next_offset'   => $next_offset,
+            'deleted'       => $deleted,
+            'media_deleted' => $media_deleted,
+            'terms_deleted' => $terms_deleted,
+            'total'         => $total,
+            'processed'     => min($next_offset, $total),
+            'message'       => $done
+                ? 'Supprimé ' . $total . ' post(s)' . ($do_media ? ' + médias' : '') . ($do_terms ? ' + ' . $terms_deleted . ' terme(s)' : '') . '. Terminé.'
+                : 'Suppression en cours… ' . min($next_offset, $total) . '/' . $total,
+        ));
     }
 
     public static function handle_delete_imported_media() {
@@ -1171,34 +1188,47 @@ class FTH_Admin {
                         if (!confirm('⚠️ SUPPRESSION DÉFINITIVE\n\n' + parts.join(', ') + '\n\nCette action est irréversible. Confirmer ?')) return;
                         btn.disabled = true; btn.textContent = '⏳ Suppression en cours…';
                         status.style.background = 'rgba(255,255,255,0.15)';
-                        status.textContent = 'Suppression en cours — veuillez patienter…';
+                        status.textContent = 'Initialisation…';
                         status.style.display = '';
-                        var fd = new FormData();
-                        fd.append('action',       'fth_delete_all_content');
-                        fd.append('activities',   doAct   ? '1' : '0');
-                        fd.append('hotels',       doHtl   ? '1' : '0');
-                        fd.append('destinations', doDest  ? '1' : '0');
-                        fd.append('terms',        doTerms ? '1' : '0');
-                        fd.append('media',        doMedia ? '1' : '0');
-                        fd.append('nonce',        nonce);
-                        fetch(ajaxurl, {method:'POST', body:fd, credentials:'same-origin'})
-                            .then(function(r){ return r.json(); })
-                            .then(function(res) {
-                                if (res && res.success) {
-                                    status.style.background = 'rgba(76,175,80,0.3)';
-                                    status.textContent = '✅ ' + res.data.message;
-                                } else {
+
+                        function runBatch(batchKey, offset) {
+                            var fd = new FormData();
+                            fd.append('action',       'fth_delete_all_content');
+                            fd.append('activities',   doAct   ? '1' : '0');
+                            fd.append('hotels',       doHtl   ? '1' : '0');
+                            fd.append('destinations', doDest  ? '1' : '0');
+                            fd.append('terms',        doTerms ? '1' : '0');
+                            fd.append('media',        doMedia ? '1' : '0');
+                            fd.append('nonce',        nonce);
+                            fd.append('batch_key',    batchKey || '');
+                            fd.append('batch_offset', offset || 0);
+                            fetch(ajaxurl, {method:'POST', body:fd, credentials:'same-origin'})
+                                .then(function(r){ return r.json(); })
+                                .then(function(res) {
+                                    if (!res || !res.success) {
+                                        status.style.background = 'rgba(244,67,54,0.3)';
+                                        status.textContent = '❌ ' + (res && res.data && res.data.message ? res.data.message : 'Erreur inconnue');
+                                        btn.disabled = false; btn.textContent = '🗑️ Delete Selected Content';
+                                        return;
+                                    }
+                                    var d = res.data;
+                                    status.textContent = d.message;
+                                    if (d.done) {
+                                        status.style.background = 'rgba(76,175,80,0.3)';
+                                        status.textContent = '✅ ' + d.message;
+                                        btn.disabled = false; btn.textContent = '🗑️ Delete Selected Content';
+                                    } else {
+                                        // Continue next batch
+                                        setTimeout(function(){ runBatch(d.batch_key, d.next_offset); }, 200);
+                                    }
+                                })
+                                .catch(function(e) {
                                     status.style.background = 'rgba(244,67,54,0.3)';
-                                    status.textContent = '❌ ' + (res && res.data && res.data.message ? res.data.message : 'Erreur inconnue');
-                                }
-                            })
-                            .catch(function(e) {
-                                status.style.background = 'rgba(244,67,54,0.3)';
-                                status.textContent = '❌ Erreur réseau: ' + e.message;
-                            })
-                            .finally(function() {
-                                btn.disabled = false; btn.textContent = '🗑️ Delete Selected Content';
-                            });
+                                    status.textContent = '❌ Erreur réseau: ' + e.message;
+                                    btn.disabled = false; btn.textContent = '🗑️ Delete Selected Content';
+                                });
+                        }
+                        runBatch('', 0);
                     });
                 })();
                 </script>
