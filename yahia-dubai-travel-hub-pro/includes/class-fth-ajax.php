@@ -297,12 +297,14 @@ private static function fetch_klook_html($url) {
     // Helper: detect ScraperAPI / proxy errors AND DataDome / bot challenge pages
     $is_error_body = function($b) {
         if (empty($b)) return true;
-        // ScraperAPI-specific errors
-        $low600 = strtolower(substr($b, 0, 600));
+        // ScraperAPI-specific errors (including geotargeting plan errors)
+        $low600 = strtolower(substr($b, 0, 1000));
         if (strpos($low600, 'request failed') !== false && strpos($low600, 'not be charged') !== false) return true;
         if (strpos($low600, '"error"') !== false && strpos($low600, 'scraperapi') !== false) return true;
         if (strpos($low600, 'protected domains') !== false) return true;
-        // NOTE: removed "premium=true" check — keep_headers=true can echo it back in valid responses
+        if (strpos($low600, 'does not include geotargeting') !== false) return true;
+        if (strpos($low600, 'upgrade your plan') !== false && strpos($low600, 'scraperapi') !== false) return true;
+        if (strpos($low600, 'scraperapi.com/support') !== false) return true;
         // DataDome / Cloudflare bot challenge — tiny page with no __NEXT_DATA__
         if (strlen($b) < 2000 && strpos($b, '__NEXT_DATA__') === false) {
             $low = strtolower($b);
@@ -330,7 +332,6 @@ private static function fetch_klook_html($url) {
             'ultra_premium' => 'true',
             'render'        => 'true',
             'country_code'  => 'us',
-            // Removed keep_headers — it can inject request URL into body, triggering false positives
         ));
         $sa_r_up = self::remote_get($sa_url_up, array('timeout' => 180));
         if (!is_wp_error($sa_r_up)) {
@@ -341,25 +342,7 @@ private static function fetch_klook_html($url) {
             if (!$is_error_body($sa_b_up) && !empty($sa_b_up)) $best_body = $sa_b_up;
         }
 
-        // ── 1b. ScraperAPI render=true + premium + UAE country ──────────────
-        // Try UAE country code (relevant for Dubai/UAE content, may bypass DataDome differently)
-        $sa_url_ae = 'https://api.scraperapi.com?' . http_build_query(array(
-            'api_key'      => $sa_key,
-            'url'          => $url,
-            'render'       => 'true',
-            'premium'      => 'true',
-            'country_code' => 'ae',
-        ));
-        $sa_r_ae = self::remote_get($sa_url_ae, array('timeout' => 120));
-        if (!is_wp_error($sa_r_ae)) {
-            $sa_b_ae = wp_remote_retrieve_body($sa_r_ae);
-            if (!$is_error_body($sa_b_ae) && strpos($sa_b_ae, '__NEXT_DATA__') !== false) {
-                return array('body' => $sa_b_ae, 'url' => $url, 'source' => 'scraperapi_ae');
-            }
-            if (!$is_error_body($sa_b_ae) && !empty($sa_b_ae) && empty($best_body)) $best_body = $sa_b_ae;
-        }
-
-        // ── 1c. ScraperAPI render=true + premium + US (original working config) ─
+        // ── 1b. ScraperAPI render=true + premium + US (original working config) ─
         $sa_url_us = 'https://api.scraperapi.com?' . http_build_query(array(
             'api_key'      => $sa_key,
             'url'          => $url,
@@ -376,7 +359,7 @@ private static function fetch_klook_html($url) {
             if (!$is_error_body($sa_b_us) && !empty($sa_b_us) && empty($best_body)) $best_body = $sa_b_us;
         }
 
-        // ── 1d. ScraperAPI render=true only (original v1.16 config — no premium) ─
+        // ── 1c. ScraperAPI render=true only (v1.16 original — no premium) ─────
         $sa_url_r = 'https://api.scraperapi.com?' . http_build_query(array(
             'api_key'      => $sa_key,
             'url'          => $url,
