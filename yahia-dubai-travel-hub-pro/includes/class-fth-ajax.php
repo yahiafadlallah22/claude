@@ -302,7 +302,7 @@ private static function fetch_klook_html($url) {
         if (strpos($low600, 'request failed') !== false && strpos($low600, 'not be charged') !== false) return true;
         if (strpos($low600, '"error"') !== false && strpos($low600, 'scraperapi') !== false) return true;
         if (strpos($low600, 'protected domains') !== false) return true;
-        if (strpos($low600, 'premium=true') !== false) return true;
+        // NOTE: removed "premium=true" check — keep_headers=true can echo it back in valid responses
         // DataDome / Cloudflare bot challenge — tiny page with no __NEXT_DATA__
         if (strlen($b) < 2000 && strpos($b, '__NEXT_DATA__') === false) {
             $low = strtolower($b);
@@ -322,9 +322,7 @@ private static function fetch_klook_html($url) {
 
     $sa_key = self::get_scraperapi_key();
 
-    // ── 1. ScraperAPI ultra_premium (DataDome-specific bypass) ───────────────
-    // ultra_premium=true is the flag specifically for DataDome-protected sites.
-    // Different from premium=true (Cloudflare) — Klook uses DataDome.
+    // ── 1a. ScraperAPI ultra_premium (DataDome bypass) ────────────────────────
     if (!empty($sa_key)) {
         $sa_url_up = 'https://api.scraperapi.com?' . http_build_query(array(
             'api_key'       => $sa_key,
@@ -332,7 +330,7 @@ private static function fetch_klook_html($url) {
             'ultra_premium' => 'true',
             'render'        => 'true',
             'country_code'  => 'us',
-            'keep_headers'  => 'true',
+            // Removed keep_headers — it can inject request URL into body, triggering false positives
         ));
         $sa_r_up = self::remote_get($sa_url_up, array('timeout' => 180));
         if (!is_wp_error($sa_r_up)) {
@@ -341,6 +339,57 @@ private static function fetch_klook_html($url) {
                 return array('body' => $sa_b_up, 'url' => $url, 'source' => 'scraperapi_ultra');
             }
             if (!$is_error_body($sa_b_up) && !empty($sa_b_up)) $best_body = $sa_b_up;
+        }
+
+        // ── 1b. ScraperAPI render=true + premium + UAE country ──────────────
+        // Try UAE country code (relevant for Dubai/UAE content, may bypass DataDome differently)
+        $sa_url_ae = 'https://api.scraperapi.com?' . http_build_query(array(
+            'api_key'      => $sa_key,
+            'url'          => $url,
+            'render'       => 'true',
+            'premium'      => 'true',
+            'country_code' => 'ae',
+        ));
+        $sa_r_ae = self::remote_get($sa_url_ae, array('timeout' => 120));
+        if (!is_wp_error($sa_r_ae)) {
+            $sa_b_ae = wp_remote_retrieve_body($sa_r_ae);
+            if (!$is_error_body($sa_b_ae) && strpos($sa_b_ae, '__NEXT_DATA__') !== false) {
+                return array('body' => $sa_b_ae, 'url' => $url, 'source' => 'scraperapi_ae');
+            }
+            if (!$is_error_body($sa_b_ae) && !empty($sa_b_ae) && empty($best_body)) $best_body = $sa_b_ae;
+        }
+
+        // ── 1c. ScraperAPI render=true + premium + US (original working config) ─
+        $sa_url_us = 'https://api.scraperapi.com?' . http_build_query(array(
+            'api_key'      => $sa_key,
+            'url'          => $url,
+            'render'       => 'true',
+            'premium'      => 'true',
+            'country_code' => 'us',
+        ));
+        $sa_r_us = self::remote_get($sa_url_us, array('timeout' => 120));
+        if (!is_wp_error($sa_r_us)) {
+            $sa_b_us = wp_remote_retrieve_body($sa_r_us);
+            if (!$is_error_body($sa_b_us) && strpos($sa_b_us, '__NEXT_DATA__') !== false) {
+                return array('body' => $sa_b_us, 'url' => $url, 'source' => 'scraperapi_premium');
+            }
+            if (!$is_error_body($sa_b_us) && !empty($sa_b_us) && empty($best_body)) $best_body = $sa_b_us;
+        }
+
+        // ── 1d. ScraperAPI render=true only (original v1.16 config — no premium) ─
+        $sa_url_r = 'https://api.scraperapi.com?' . http_build_query(array(
+            'api_key'      => $sa_key,
+            'url'          => $url,
+            'render'       => 'true',
+            'country_code' => 'us',
+        ));
+        $sa_r_r = self::remote_get($sa_url_r, array('timeout' => 120));
+        if (!is_wp_error($sa_r_r)) {
+            $sa_b_r = wp_remote_retrieve_body($sa_r_r);
+            if (!$is_error_body($sa_b_r) && strpos($sa_b_r, '__NEXT_DATA__') !== false) {
+                return array('body' => $sa_b_r, 'url' => $url, 'source' => 'scraperapi_render');
+            }
+            if (!$is_error_body($sa_b_r) && !empty($sa_b_r) && empty($best_body)) $best_body = $sa_b_r;
         }
     }
 
@@ -462,42 +511,7 @@ private static function fetch_klook_html($url) {
         }
     }
 
-    // ── 3. ScraperAPI render=true + premium ───────────────────────────────────
-    if (!empty($sa_key)) {
-        $sa_url = 'https://api.scraperapi.com?' . http_build_query(array(
-            'api_key'      => $sa_key,
-            'url'          => $url,
-            'render'       => 'true',
-            'premium'      => 'true',
-            'country_code' => 'us',
-            'keep_headers' => 'true',
-        ));
-        $sa_r = self::remote_get($sa_url, array('timeout' => 120));
-        if (!is_wp_error($sa_r)) {
-            $sa_b = wp_remote_retrieve_body($sa_r);
-            if (!$is_error_body($sa_b) && strpos($sa_b, '__NEXT_DATA__') !== false) {
-                return array('body' => $sa_b, 'url' => $url, 'source' => 'scraperapi');
-            }
-            if (!$is_error_body($sa_b) && !empty($sa_b)) $best_body = $sa_b;
-        }
-        // render=true without premium
-        $sa_url2 = 'https://api.scraperapi.com?' . http_build_query(array(
-            'api_key'      => $sa_key,
-            'url'          => $url,
-            'render'       => 'true',
-            'country_code' => 'us',
-        ));
-        $sa_r2 = self::remote_get($sa_url2, array('timeout' => 90));
-        if (!is_wp_error($sa_r2)) {
-            $sa_b2 = wp_remote_retrieve_body($sa_r2);
-            if (!$is_error_body($sa_b2) && strpos($sa_b2, '__NEXT_DATA__') !== false) {
-                return array('body' => $sa_b2, 'url' => $url, 'source' => 'scraperapi_render');
-            }
-            if (!$is_error_body($sa_b2) && !empty($sa_b2) && empty($best_body)) $best_body = $sa_b2;
-        }
-    }
-
-    // ── 4. Direct cURL ────────────────────────────────────────────────────────
+    // ── 3. Direct cURL ────────────────────────────────────────────────────────
     $r = self::remote_get($url, array('timeout' => 30));
     if (!is_wp_error($r)) {
         $b = wp_remote_retrieve_body($r);
