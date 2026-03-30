@@ -2111,6 +2111,10 @@ public static function import_bulk_city() {
         if (!empty($params['city'])) {
             wp_set_object_terms($post_id, intval($params['city']), 'travel_city');
             $city_id = intval($params['city']);
+            // Link city → country (needed by render_seo_footer to list cities under their country)
+            if (!empty($params['country'])) {
+                update_term_meta($city_id, 'fth_parent_country', intval($params['country']));
+            }
             if (!get_term_meta($city_id, 'fth_hero_image', true)) {
                 $city_t = get_term($city_id, 'travel_city');
                 if ($city_t && !is_wp_error($city_t)) {
@@ -2618,6 +2622,9 @@ public static function import_bulk_city() {
         if (!empty($params['city'])) {
             wp_set_object_terms($post_id, intval($params['city']), 'travel_city');
             $city_id = intval($params['city']);
+            if (!empty($params['country'])) {
+                update_term_meta($city_id, 'fth_parent_country', intval($params['country']));
+            }
             if (!get_term_meta($city_id, 'fth_hero_image', true)) {
                 $city_t = get_term($city_id, 'travel_city');
                 if ($city_t && !is_wp_error($city_t)) {

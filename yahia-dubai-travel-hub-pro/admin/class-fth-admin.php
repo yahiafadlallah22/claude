@@ -3051,43 +3051,47 @@ if (document.readyState === 'loading') {
                         var existingLabel = forceUpdate ? ' (mise à jour forcée)' : '';
                         log('✅ ' + urls.length + ' ' + typeLabel + ' à importer pour ' + cityInfo.name + existingLabel, '#34d399');
 
-                        for (var ui = 0; ui < urls.length && !stopped; ui++) {
-                            var itemUrl = urls[ui];
+                        // Import in parallel batches of 3 for speed
+                        var BATCH_SIZE = 3;
+                        for (var ui = 0; ui < urls.length && !stopped; ui += BATCH_SIZE) {
+                            var batch = urls.slice(ui, Math.min(ui + BATCH_SIZE, urls.length));
                             remaining = urls.length - ui;
-                            currentSpan.textContent = '⬇️ Import ' + (ui+1) + '/' + urls.length + ' — ' + itemUrl.split('/').slice(-2,-1)[0];
+                            currentSpan.textContent = '⬇️ Import ' + Math.min(ui + BATCH_SIZE, urls.length) + '/' + urls.length + ' — ' + cityInfo.name;
                             updateStats();
 
-                            // Use resolved WP IDs when available; always pass name/slug as fallback
-                            // so PHP can auto-create/find the correct terms per city
                             var useCity    = cityInfo.id         || 0;
                             var useCountry = cityInfo.country_id || 0;
-                            // Only fall back to WP selector if city has no name info at all
                             if (!useCity && !cityInfo.name && wpCity)    useCity    = wpCity;
                             if (!useCountry && !cityInfo.country_name && wpCountry) useCountry = wpCountry;
 
-                            var impRes = await ajaxPost({
-                                action:        'fth_import_single_live',
-                                url:           itemUrl,
-                                type:          type,
-                                city:          useCity,
-                                city_name:     cityInfo.name         || '',
-                                city_slug:     cityInfo.slug         || '',
-                                country:       useCountry,
-                                country_name:  cityInfo.country_name || '',
-                                country_slug:  cityInfo.country_slug || '',
-                                category:      '',
-                                publish:       1,
-                                nonce:         NONCE
-                            });
+                            var batchResults = await Promise.all(batch.map(function(itemUrl) {
+                                return ajaxPost({
+                                    action:        'fth_import_single_live',
+                                    url:           itemUrl,
+                                    type:          type,
+                                    city:          useCity,
+                                    city_name:     cityInfo.name         || '',
+                                    city_slug:     cityInfo.slug         || '',
+                                    country:       useCountry,
+                                    country_name:  cityInfo.country_name || '',
+                                    country_slug:  cityInfo.country_slug || '',
+                                    category:      '',
+                                    publish:       1,
+                                    nonce:         NONCE
+                                }).then(function(r) { return {res: r, url: itemUrl}; })
+                                  .catch(function() { return {res: null, url: itemUrl}; });
+                            }));
 
-                            if (impRes && impRes.success) {
-                                imported++;
-                                log('✅ ' + (impRes.data && impRes.data.title ? impRes.data.title : itemUrl));
-                            } else {
-                                errors++;
-                                var errMsg = (impRes && impRes.data && impRes.data.message) ? impRes.data.message : 'Échec';
-                                log('❌ ' + itemUrl.split('/').slice(-2,-1)[0] + ' — ' + errMsg, '#f87171');
-                            }
+                            batchResults.forEach(function(item) {
+                                if (item.res && item.res.success) {
+                                    imported++;
+                                    log('✅ ' + (item.res.data && item.res.data.title ? item.res.data.title : item.url));
+                                } else {
+                                    errors++;
+                                    var errMsg = (item.res && item.res.data && item.res.data.message) ? item.res.data.message : 'Échec';
+                                    log('❌ ' + item.url.split('/').slice(-2,-1)[0] + ' — ' + errMsg, '#f87171');
+                                }
+                            });
                             updateStats();
                         }
                         remaining = 0;

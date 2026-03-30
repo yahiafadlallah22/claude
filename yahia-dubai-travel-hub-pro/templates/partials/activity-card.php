@@ -25,6 +25,10 @@ if (!$card_image && has_post_thumbnail($card_id)) {
 if (!$card_image) {
     $card_image = 'https://images.unsplash.com/photo-1469854523086-cc02fe5d8800?w=400';
 }
+// Proxy Klook CDN URLs so they display without hotlink blocks
+if (class_exists('Flavor_Travel_Hub')) {
+    $card_image = Flavor_Travel_Hub::fth_img_url($card_image);
+}
 
 $currency = get_option('fth_default_currency', 'USD');
 $currency_symbols = array('USD' => '$', 'AED' => 'AED ', 'EUR' => '€', 'GBP' => '£', 'SAR' => 'SAR ', 'QAR' => 'QAR ');
