@@ -1256,10 +1256,11 @@ public static function discover_import_urls() {
     if (!current_user_can('edit_posts')) {
         self::send_json_error_clean('Unauthorized');
     }
-    $type  = isset($_POST['type']) ? sanitize_text_field($_POST['type']) : 'activity';
-    $url   = isset($_POST['url']) ? esc_url_raw($_POST['url']) : '';
-    $city  = isset($_POST['city']) ? intval($_POST['city']) : 0;
-    $limit = isset($_POST['limit']) ? max(1, min(200, intval($_POST['limit']))) : 50;
+    $type         = isset($_POST['type']) ? sanitize_text_field($_POST['type']) : 'activity';
+    $url          = isset($_POST['url']) ? esc_url_raw($_POST['url']) : '';
+    $city         = isset($_POST['city']) ? intval($_POST['city']) : 0;
+    $limit        = isset($_POST['limit']) ? max(1, min(200, intval($_POST['limit']))) : 50;
+    $force_update = !empty($_POST['force_update']);
     if (empty($url)) {
         self::send_json_error_clean('Please enter a destination URL');
     }
@@ -1315,25 +1316,32 @@ public static function discover_import_urls() {
         }
     }
     $all_links = array_values(array_unique($all_links));
-    // Filter already-imported
-    $already = self::get_imported_klook_ids($type);
-    $id_pattern = $type === 'hotel' ? '#/hotels?/(?:detail/)?(\d+)-#' : '#/activity/(\d+)-#';
-    $new_links = array();
-    foreach ($all_links as $lnk) {
-        if (preg_match($id_pattern, $lnk, $lm)) {
-            $kid = !empty($lm[1]) ? $lm[1] : (!empty($lm[2]) ? $lm[2] : '');
-            if ($kid && in_array($kid, $already, true)) continue;
+    $already_count = 0;
+    if (!$force_update) {
+        // Filter already-imported items (skip them on normal run)
+        $already = self::get_imported_klook_ids($type);
+        $id_pattern = $type === 'hotel' ? '#/hotels?/(?:detail/)?(\d+)-#' : '#/activity/(\d+)-#';
+        $new_links = array();
+        foreach ($all_links as $lnk) {
+            if (preg_match($id_pattern, $lnk, $lm)) {
+                $kid = !empty($lm[1]) ? $lm[1] : (!empty($lm[2]) ? $lm[2] : '');
+                if ($kid && in_array($kid, $already, true)) { $already_count++; continue; }
+            }
+            $new_links[] = $lnk;
         }
-        $new_links[] = $lnk;
+    } else {
+        // Force update mode: include all discovered links (re-import / update existing)
+        $new_links = $all_links;
     }
     $new_links = array_slice($new_links, 0, $limit);
     if (empty($new_links)) {
         self::send_json_error_clean('No new URLs found to import. All discovered items are already in the database.');
     }
     self::send_json_success_clean(array(
-        'urls'    => $new_links,
-        'total'   => count($new_links),
-        'skipped' => count($all_links) - count($new_links),
+        'urls'         => $new_links,
+        'total'        => count($new_links),
+        'skipped'      => $already_count,
+        'force_update' => $force_update,
     ));
 }
 
@@ -1348,13 +1356,43 @@ public static function import_single_live() {
     if (!current_user_can('edit_posts')) {
         self::send_json_error_clean('Unauthorized');
     }
-    $url     = isset($_POST['url'])     ? esc_url_raw($_POST['url'])         : '';
-    $type    = isset($_POST['type'])    ? sanitize_text_field($_POST['type']) : 'activity';
-    $city    = isset($_POST['city'])    ? intval($_POST['city'])               : 0;
-    $country = isset($_POST['country']) ? intval($_POST['country'])            : 0;
-    $cat     = isset($_POST['category'])? intval($_POST['category'])           : 0;
+    $url          = isset($_POST['url'])          ? esc_url_raw($_POST['url'])                  : '';
+    $type         = isset($_POST['type'])         ? sanitize_text_field($_POST['type'])          : 'activity';
+    $city         = isset($_POST['city'])         ? intval($_POST['city'])                       : 0;
+    $country      = isset($_POST['country'])      ? intval($_POST['country'])                    : 0;
+    $cat          = isset($_POST['category'])     ? intval($_POST['category'])                   : 0;
+    $city_name    = isset($_POST['city_name'])    ? sanitize_text_field($_POST['city_name'])     : '';
+    $city_slug    = isset($_POST['city_slug'])    ? sanitize_text_field($_POST['city_slug'])     : '';
+    $country_name = isset($_POST['country_name']) ? sanitize_text_field($_POST['country_name']) : '';
+    $country_slug = isset($_POST['country_slug']) ? sanitize_text_field($_POST['country_slug']) : '';
+
     if (empty($url)) {
         self::send_json_error_clean('No URL provided');
+    }
+
+    // ── Resolve city WP term by slug/name when only name is available ──────
+    if (!$city && ($city_slug || $city_name)) {
+        $found = $city_slug ? get_term_by('slug', $city_slug, 'travel_city')
+                            : get_term_by('name', $city_name, 'travel_city');
+        if ($found && !is_wp_error($found)) {
+            $city = $found->term_id;
+        } elseif ($city_name) {
+            $ins = wp_insert_term($city_name, 'travel_city',
+                $city_slug ? array('slug' => $city_slug) : array());
+            if (!is_wp_error($ins)) $city = $ins['term_id'];
+        }
+    }
+    // ── Resolve country WP term ─────────────────────────────────────────────
+    if (!$country && ($country_slug || $country_name)) {
+        $found = $country_slug ? get_term_by('slug', $country_slug, 'travel_country')
+                               : get_term_by('name', $country_name, 'travel_country');
+        if ($found && !is_wp_error($found)) {
+            $country = $found->term_id;
+        } elseif ($country_name) {
+            $ins = wp_insert_term($country_name, 'travel_country',
+                $country_slug ? array('slug' => $country_slug) : array());
+            if (!is_wp_error($ins)) $country = $ins['term_id'];
+        }
     }
     $params = array(
         'city'         => $city, 'country' => $country, 'category' => $cat,
@@ -2701,24 +2739,42 @@ public static function import_bulk_city() {
             if (is_array($next)) {
                 $htl_page_props_raw = isset($next['props']['pageProps']) ? $next['props']['pageProps'] : $next;
 
-                // Klook (2024-2025) uses React Query: real data lives in dehydratedState.queries[n].state.data
+                // Klook (2024-2025) uses React Query. Same contamination-filtering as activity parser:
+                // skip list/recommendation queries that contain OTHER hotels, use only the primary hotel query.
                 $props = $htl_page_props_raw;
                 if (isset($htl_page_props_raw['dehydratedState']['queries']) && is_array($htl_page_props_raw['dehydratedState']['queries'])) {
-                    $htl_act_qs   = array();
-                    $htl_other_qs = array();
+                    $htl_primary   = null;
+                    $htl_suppl     = array();
+                    $htl_list_pats = array('list','recommend','similar','related','popular','search','nearby','also','suggestion','trending','featured','top','best');
                     foreach ($htl_page_props_raw['dehydratedState']['queries'] as $dq) {
                         if (empty($dq['state']['data'])) continue;
+                        $qdata = $dq['state']['data'];
                         $qhash = strtolower(isset($dq['queryHash']) ? $dq['queryHash'] : '');
-                        if (strpos($qhash, 'hotel') !== false || strpos($qhash, 'detail') !== false
-                            || strpos($qhash, 'property') !== false || strpos($qhash, 'room') !== false) {
-                            $htl_act_qs[] = $dq['state']['data'];
+                        $is_list = false;
+                        foreach ($htl_list_pats as $lp) {
+                            if (strpos($qhash, $lp) !== false) { $is_list = true; break; }
+                        }
+                        // Also skip if data is an array of hotel objects
+                        if (!$is_list && is_array($qdata) && isset($qdata[0]) && is_array($qdata[0])
+                            && (isset($qdata[0]['hotel_id']) || isset($qdata[0]['hotelId']) || isset($qdata[0]['property_id']))) {
+                            $is_list = true;
+                        }
+                        if ($is_list) continue;
+                        $is_detail = (strpos($qhash, 'detail') !== false || strpos($qhash, 'gethotel') !== false
+                                   || strpos($qhash, 'hoteldetail') !== false || strpos($qhash, 'property') !== false
+                                   || strpos($qhash, 'hotel_info') !== false || strpos($qhash, 'hotel_detail') !== false);
+                        if ($is_detail && empty($htl_primary)) {
+                            $htl_primary = $qdata;
                         } else {
-                            $htl_other_qs[] = $dq['state']['data'];
+                            $htl_suppl[] = $qdata;
                         }
                     }
-                    $htl_all_qs = array_merge($htl_act_qs, $htl_other_qs);
-                    if (!empty($htl_all_qs)) {
-                        $props = array_merge(array('_klook_queries' => $htl_all_qs), $htl_page_props_raw);
+                    if (!empty($htl_primary)) {
+                        $hlayers = array('_htl_detail' => $htl_primary);
+                        if (!empty($htl_suppl)) $hlayers['_htl_supplement'] = $htl_suppl;
+                        $props = array_merge($hlayers, $htl_page_props_raw);
+                    } elseif (!empty($htl_suppl)) {
+                        $props = array_merge(array('_htl_supplement' => $htl_suppl), $htl_page_props_raw);
                     }
                 }
 
@@ -3262,26 +3318,62 @@ if ($next_data_raw !== '') {
         $page_props_raw = isset($next_json['props']['pageProps']) ? $next_json['props']['pageProps'] : $next_json;
 
         // Klook (2024-2025) uses React Query: real data lives in dehydratedState.queries[n].state.data
-        // Extract all query payloads and inject them at the top of the search tree so array_find_first
-        // reaches them before the sparse pageProps shell.
+        // CRITICAL: we must identify the ONE query that matches our activity and use it exclusively for
+        // description/title/highlights.  List/recommendation queries contain OTHER activities and will
+        // contaminate the extracted data if we merge them all together naively.
         $next_props = $page_props_raw;
         if (isset($page_props_raw['dehydratedState']['queries']) && is_array($page_props_raw['dehydratedState']['queries'])) {
-            $act_qs   = array();
-            $other_qs = array();
+            $primary_data = null;  // the query data that IS this specific activity
+            $supplement   = array(); // other useful queries (packages, prices) — searched after primary
+
+            // Patterns that indicate a query holds OTHER activities (not the current one)
+            $contamination_patterns = array('list','recommend','similar','related','popular','search','nearby','also','suggestion','more','trending','featured','top','best');
+
             foreach ($page_props_raw['dehydratedState']['queries'] as $dq) {
                 if (empty($dq['state']['data'])) continue;
+                $qdata = $dq['state']['data'];
                 $qhash = strtolower(isset($dq['queryHash']) ? $dq['queryHash'] : '');
-                if (strpos($qhash, 'activity') !== false || strpos($qhash, 'detail') !== false
-                    || strpos($qhash, 'product') !== false || strpos($qhash, 'package') !== false) {
-                    $act_qs[] = $dq['state']['data'];
+
+                // Skip queries that are lists of OTHER activities — these cause cross-contamination
+                $is_list = false;
+                foreach ($contamination_patterns as $cp) {
+                    if (strpos($qhash, $cp) !== false) { $is_list = true; break; }
+                }
+                // Also skip if the data is a numerically-indexed array of multiple activities
+                if (!$is_list && is_array($qdata) && isset($qdata[0]) && is_array($qdata[0])
+                    && (isset($qdata[0]['activity_id']) || isset($qdata[0]['activityId']))) {
+                    $is_list = true;
+                }
+                if ($is_list) continue;
+
+                // Try to find the query that matches our specific activity_id (from URL)
+                if (!empty($activity_id)) {
+                    $qid = isset($qdata['activity_id']) ? (string) $qdata['activity_id']
+                         : (isset($qdata['activityId'])  ? (string) $qdata['activityId'] : '');
+                    if ($qid !== '' && $qid === (string) $activity_id) {
+                        $primary_data = $qdata; // exact match — this is our activity's data
+                        continue;
+                    }
+                }
+
+                // Heuristic: queries with 'detail' / 'getactivity' in hash are likely the main activity
+                $is_detail = (strpos($qhash, 'detail') !== false || strpos($qhash, 'getactivity') !== false
+                           || strpos($qhash, 'activitydetail') !== false || strpos($qhash, 'product_detail') !== false
+                           || strpos($qhash, 'productdetail') !== false);
+                if ($is_detail && empty($primary_data)) {
+                    $primary_data = $qdata;
                 } else {
-                    $other_qs[] = $dq['state']['data'];
+                    $supplement[] = $qdata; // packages, prices, reviews, etc.
                 }
             }
-            $all_qs = array_merge($act_qs, $other_qs);
-            if (!empty($all_qs)) {
-                // Prepend so DFS hits activity data before the sparse pageProps shell
-                $next_props = array_merge(array('_klook_queries' => $all_qs), $page_props_raw);
+
+            // Build $next_props: primary data searched first, then supplements, then raw page props
+            if (!empty($primary_data)) {
+                $layers = array('_act_detail' => $primary_data);
+                if (!empty($supplement)) $layers['_act_supplement'] = $supplement;
+                $next_props = array_merge($layers, $page_props_raw);
+            } elseif (!empty($supplement)) {
+                $next_props = array_merge(array('_act_supplement' => $supplement), $page_props_raw);
             }
         }
 

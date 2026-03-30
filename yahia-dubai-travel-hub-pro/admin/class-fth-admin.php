@@ -2400,107 +2400,157 @@ if (document.readyState === 'loading') {
     public static function marathon_page() {
         if (!current_user_can('manage_options')) { wp_die('Unauthorized'); }
 
-        // Build city/country data for JS
-        $cities_terms    = get_terms(array('taxonomy' => 'travel_city',    'hide_empty' => false, 'orderby' => 'name'));
-        $countries_terms = get_terms(array('taxonomy' => 'travel_country', 'hide_empty' => false, 'orderby' => 'name'));
-        if (is_wp_error($cities_terms))    $cities_terms    = array();
-        if (is_wp_error($countries_terms)) $countries_terms = array();
-
-        // Map country_id => [city objects]
-        $country_cities_map = array();
+        // WP cities for "All my cities" mode
+        $cities_terms = get_terms(array('taxonomy' => 'travel_city', 'hide_empty' => false, 'orderby' => 'name'));
+        if (is_wp_error($cities_terms)) $cities_terms = array();
+        $js_wp_cities = array();
         foreach ($cities_terms as $ct) {
-            $pc = get_term_meta($ct->term_id, 'fth_parent_country', true);
-            if ($pc) { $country_cities_map[(int)$pc][] = $ct; }
+            $ku = get_term_meta($ct->term_id, '_fth_klook_url', true);
+            if (empty($ku)) $ku = 'https://www.klook.com/en-US/things-to-do/' . $ct->slug . '/';
+            $js_wp_cities[] = array('id' => $ct->term_id, 'name' => $ct->name, 'slug' => $ct->slug, 'url' => $ku, 'country_id' => (int)get_term_meta($ct->term_id, 'fth_parent_country', true));
         }
 
-        // Build JS city objects: {id, name, slug, url}
-        $js_cities = array();
-        foreach ($cities_terms as $ct) {
-            $klook_url = get_term_meta($ct->term_id, '_fth_klook_url', true);
-            if (empty($klook_url)) {
-                $klook_url = 'https://www.klook.com/en-US/things-to-do/' . $ct->slug . '/';
-            }
-            $cid = (int) get_term_meta($ct->term_id, 'fth_parent_country', true);
-            $js_cities[] = array('id' => $ct->term_id, 'name' => $ct->name, 'slug' => $ct->slug, 'url' => $klook_url, 'country_id' => $cid);
-        }
-        $js_countries = array();
-        foreach ($countries_terms as $co) {
-            $city_list = isset($country_cities_map[$co->term_id]) ? $country_cities_map[$co->term_id] : array();
-            $city_data = array();
-            foreach ($city_list as $ct) {
-                $ku = get_term_meta($ct->term_id, '_fth_klook_url', true);
-                if (empty($ku)) $ku = 'https://www.klook.com/en-US/things-to-do/' . $ct->slug . '/';
-                $city_data[] = array('id' => $ct->term_id, 'name' => $ct->name, 'slug' => $ct->slug, 'url' => $ku, 'country_id' => $co->term_id);
-            }
-            $js_countries[] = array('id' => $co->term_id, 'name' => $co->name, 'slug' => $co->slug, 'cities' => $city_data);
-        }
-
-        // World cities — full global list with known Klook destination URLs
-        $world_cities = array(
-            // UAE
-            array('name'=>'Dubai','slug'=>'dubai','url'=>'https://www.klook.com/en-US/destination/c78-dubai/1-things-to-do/','country'=>'UAE'),
-            array('name'=>'Abu Dhabi','slug'=>'abu-dhabi','url'=>'https://www.klook.com/en-US/destination/c79-abu-dhabi/1-things-to-do/','country'=>'UAE'),
-            array('name'=>'Sharjah','slug'=>'sharjah','url'=>'https://www.klook.com/en-US/things-to-do/sharjah/','country'=>'UAE'),
-            array('name'=>'Ras Al Khaimah','slug'=>'ras-al-khaimah','url'=>'https://www.klook.com/en-US/things-to-do/ras-al-khaimah/','country'=>'UAE'),
-            // Qatar / Saudi / Kuwait / Oman / Bahrain / Jordan
-            array('name'=>'Doha','slug'=>'doha','url'=>'https://www.klook.com/en-US/destination/c80-doha/1-things-to-do/','country'=>'Qatar'),
-            array('name'=>'Riyadh','slug'=>'riyadh','url'=>'https://www.klook.com/en-US/things-to-do/riyadh/','country'=>'Saudi Arabia'),
-            array('name'=>'Jeddah','slug'=>'jeddah','url'=>'https://www.klook.com/en-US/things-to-do/jeddah/','country'=>'Saudi Arabia'),
-            array('name'=>'Mecca','slug'=>'mecca','url'=>'https://www.klook.com/en-US/things-to-do/mecca/','country'=>'Saudi Arabia'),
-            array('name'=>'Kuwait City','slug'=>'kuwait-city','url'=>'https://www.klook.com/en-US/things-to-do/kuwait-city/','country'=>'Kuwait'),
-            array('name'=>'Muscat','slug'=>'muscat','url'=>'https://www.klook.com/en-US/things-to-do/muscat/','country'=>'Oman'),
-            array('name'=>'Manama','slug'=>'manama','url'=>'https://www.klook.com/en-US/things-to-do/manama/','country'=>'Bahrain'),
-            array('name'=>'Amman','slug'=>'amman','url'=>'https://www.klook.com/en-US/things-to-do/amman/','country'=>'Jordan'),
-            array('name'=>'Petra','slug'=>'petra','url'=>'https://www.klook.com/en-US/things-to-do/petra/','country'=>'Jordan'),
-            array('name'=>'Beirut','slug'=>'beirut','url'=>'https://www.klook.com/en-US/things-to-do/beirut/','country'=>'Lebanon'),
-            // Asia
-            array('name'=>'Bangkok','slug'=>'bangkok','url'=>'https://www.klook.com/en-US/things-to-do/bangkok/','country'=>'Thailand'),
-            array('name'=>'Phuket','slug'=>'phuket','url'=>'https://www.klook.com/en-US/things-to-do/phuket/','country'=>'Thailand'),
-            array('name'=>'Chiang Mai','slug'=>'chiang-mai','url'=>'https://www.klook.com/en-US/things-to-do/chiang-mai/','country'=>'Thailand'),
-            array('name'=>'Singapore','slug'=>'singapore','url'=>'https://www.klook.com/en-US/things-to-do/singapore/','country'=>'Singapore'),
-            array('name'=>'Kuala Lumpur','slug'=>'kuala-lumpur','url'=>'https://www.klook.com/en-US/things-to-do/kuala-lumpur/','country'=>'Malaysia'),
-            array('name'=>'Bali','slug'=>'bali','url'=>'https://www.klook.com/en-US/things-to-do/bali/','country'=>'Indonesia'),
-            array('name'=>'Jakarta','slug'=>'jakarta','url'=>'https://www.klook.com/en-US/things-to-do/jakarta/','country'=>'Indonesia'),
-            array('name'=>'Tokyo','slug'=>'tokyo','url'=>'https://www.klook.com/en-US/things-to-do/tokyo/','country'=>'Japan'),
-            array('name'=>'Osaka','slug'=>'osaka','url'=>'https://www.klook.com/en-US/things-to-do/osaka/','country'=>'Japan'),
-            array('name'=>'Kyoto','slug'=>'kyoto','url'=>'https://www.klook.com/en-US/things-to-do/kyoto/','country'=>'Japan'),
-            array('name'=>'Seoul','slug'=>'seoul','url'=>'https://www.klook.com/en-US/things-to-do/seoul/','country'=>'South Korea'),
-            array('name'=>'Hong Kong','slug'=>'hong-kong','url'=>'https://www.klook.com/en-US/things-to-do/hong-kong/','country'=>'Hong Kong'),
-            array('name'=>'Taipei','slug'=>'taipei','url'=>'https://www.klook.com/en-US/things-to-do/taipei/','country'=>'Taiwan'),
-            array('name'=>'Beijing','slug'=>'beijing','url'=>'https://www.klook.com/en-US/things-to-do/beijing/','country'=>'China'),
-            array('name'=>'Shanghai','slug'=>'shanghai','url'=>'https://www.klook.com/en-US/things-to-do/shanghai/','country'=>'China'),
-            array('name'=>'Mumbai','slug'=>'mumbai','url'=>'https://www.klook.com/en-US/things-to-do/mumbai/','country'=>'India'),
-            array('name'=>'Delhi','slug'=>'delhi','url'=>'https://www.klook.com/en-US/things-to-do/delhi/','country'=>'India'),
-            array('name'=>'Agra','slug'=>'agra','url'=>'https://www.klook.com/en-US/things-to-do/agra/','country'=>'India'),
-            array('name'=>'Hanoi','slug'=>'hanoi','url'=>'https://www.klook.com/en-US/things-to-do/hanoi/','country'=>'Vietnam'),
-            array('name'=>'Ho Chi Minh City','slug'=>'ho-chi-minh-city','url'=>'https://www.klook.com/en-US/things-to-do/ho-chi-minh-city/','country'=>'Vietnam'),
-            array('name'=>'Phnom Penh','slug'=>'phnom-penh','url'=>'https://www.klook.com/en-US/things-to-do/phnom-penh/','country'=>'Cambodia'),
-            array('name'=>'Siem Reap','slug'=>'siem-reap','url'=>'https://www.klook.com/en-US/things-to-do/siem-reap/','country'=>'Cambodia'),
-            // Europe
-            array('name'=>'Paris','slug'=>'paris','url'=>'https://www.klook.com/en-US/things-to-do/paris/','country'=>'France'),
-            array('name'=>'London','slug'=>'london','url'=>'https://www.klook.com/en-US/things-to-do/london/','country'=>'UK'),
-            array('name'=>'Rome','slug'=>'rome','url'=>'https://www.klook.com/en-US/things-to-do/rome/','country'=>'Italy'),
-            array('name'=>'Barcelona','slug'=>'barcelona','url'=>'https://www.klook.com/en-US/things-to-do/barcelona/','country'=>'Spain'),
-            array('name'=>'Madrid','slug'=>'madrid','url'=>'https://www.klook.com/en-US/things-to-do/madrid/','country'=>'Spain'),
-            array('name'=>'Amsterdam','slug'=>'amsterdam','url'=>'https://www.klook.com/en-US/things-to-do/amsterdam/','country'=>'Netherlands'),
-            array('name'=>'Berlin','slug'=>'berlin','url'=>'https://www.klook.com/en-US/things-to-do/berlin/','country'=>'Germany'),
-            array('name'=>'Vienna','slug'=>'vienna','url'=>'https://www.klook.com/en-US/things-to-do/vienna/','country'=>'Austria'),
-            array('name'=>'Prague','slug'=>'prague','url'=>'https://www.klook.com/en-US/things-to-do/prague/','country'=>'Czech Republic'),
-            array('name'=>'Istanbul','slug'=>'istanbul','url'=>'https://www.klook.com/en-US/things-to-do/istanbul/','country'=>'Turkey'),
-            array('name'=>'Athens','slug'=>'athens','url'=>'https://www.klook.com/en-US/things-to-do/athens/','country'=>'Greece'),
-            array('name'=>'Santorini','slug'=>'santorini','url'=>'https://www.klook.com/en-US/things-to-do/santorini/','country'=>'Greece'),
-            // Americas / Africa
-            array('name'=>'New York','slug'=>'new-york','url'=>'https://www.klook.com/en-US/things-to-do/new-york/','country'=>'USA'),
-            array('name'=>'Los Angeles','slug'=>'los-angeles','url'=>'https://www.klook.com/en-US/things-to-do/los-angeles/','country'=>'USA'),
-            array('name'=>'Las Vegas','slug'=>'las-vegas','url'=>'https://www.klook.com/en-US/things-to-do/las-vegas/','country'=>'USA'),
-            array('name'=>'Cairo','slug'=>'cairo','url'=>'https://www.klook.com/en-US/things-to-do/cairo/','country'=>'Egypt'),
-            array('name'=>'Cape Town','slug'=>'cape-town','url'=>'https://www.klook.com/en-US/things-to-do/cape-town/','country'=>'South Africa'),
-            array('name'=>'Sydney','slug'=>'sydney','url'=>'https://www.klook.com/en-US/things-to-do/sydney/','country'=>'Australia'),
-            array('name'=>'Melbourne','slug'=>'melbourne','url'=>'https://www.klook.com/en-US/things-to-do/melbourne/','country'=>'Australia'),
+        // ── STATIC country → cities list (works on fresh install, no WP DB dependency)
+        // Each city has: name, slug, acts_url (activities listing), hotels_url
+        $country_cities_static = array(
+            'UAE' => array(
+                array('name'=>'Dubai',        'slug'=>'dubai',        'acts_url'=>'https://www.klook.com/en-US/destination/c78-dubai/1-things-to-do/', 'hotels_url'=>'https://www.klook.com/en-US/destination/c78-dubai/3-hotel/'),
+                array('name'=>'Abu Dhabi',    'slug'=>'abu-dhabi',    'acts_url'=>'https://www.klook.com/en-US/destination/c79-abu-dhabi/1-things-to-do/', 'hotels_url'=>'https://www.klook.com/en-US/destination/c79-abu-dhabi/3-hotel/'),
+                array('name'=>'Sharjah',      'slug'=>'sharjah',      'acts_url'=>'https://www.klook.com/en-US/things-to-do/sharjah/', 'hotels_url'=>'https://www.klook.com/en-US/things-to-do/sharjah/'),
+                array('name'=>'Ras Al Khaimah','slug'=>'ras-al-khaimah','acts_url'=>'https://www.klook.com/en-US/things-to-do/ras-al-khaimah/', 'hotels_url'=>'https://www.klook.com/en-US/things-to-do/ras-al-khaimah/'),
+                array('name'=>'Fujairah',     'slug'=>'fujairah',     'acts_url'=>'https://www.klook.com/en-US/things-to-do/fujairah/', 'hotels_url'=>'https://www.klook.com/en-US/things-to-do/fujairah/'),
+            ),
+            'Qatar' => array(
+                array('name'=>'Doha','slug'=>'doha','acts_url'=>'https://www.klook.com/en-US/destination/c80-doha/1-things-to-do/','hotels_url'=>'https://www.klook.com/en-US/destination/c80-doha/3-hotel/'),
+            ),
+            'Saudi Arabia' => array(
+                array('name'=>'Riyadh','slug'=>'riyadh','acts_url'=>'https://www.klook.com/en-US/things-to-do/riyadh/','hotels_url'=>'https://www.klook.com/en-US/things-to-do/riyadh/'),
+                array('name'=>'Jeddah','slug'=>'jeddah','acts_url'=>'https://www.klook.com/en-US/things-to-do/jeddah/','hotels_url'=>'https://www.klook.com/en-US/things-to-do/jeddah/'),
+                array('name'=>'Mecca','slug'=>'mecca','acts_url'=>'https://www.klook.com/en-US/things-to-do/mecca/','hotels_url'=>'https://www.klook.com/en-US/things-to-do/mecca/'),
+                array('name'=>'Medina','slug'=>'medina','acts_url'=>'https://www.klook.com/en-US/things-to-do/medina/','hotels_url'=>'https://www.klook.com/en-US/things-to-do/medina/'),
+                array('name'=>'AlUla','slug'=>'alula','acts_url'=>'https://www.klook.com/en-US/things-to-do/al-ula/','hotels_url'=>'https://www.klook.com/en-US/things-to-do/al-ula/'),
+            ),
+            'Kuwait' => array(
+                array('name'=>'Kuwait City','slug'=>'kuwait-city','acts_url'=>'https://www.klook.com/en-US/things-to-do/kuwait-city/','hotels_url'=>'https://www.klook.com/en-US/things-to-do/kuwait-city/'),
+            ),
+            'Oman' => array(
+                array('name'=>'Muscat','slug'=>'muscat','acts_url'=>'https://www.klook.com/en-US/things-to-do/muscat/','hotels_url'=>'https://www.klook.com/en-US/things-to-do/muscat/'),
+                array('name'=>'Salalah','slug'=>'salalah','acts_url'=>'https://www.klook.com/en-US/things-to-do/salalah/','hotels_url'=>'https://www.klook.com/en-US/things-to-do/salalah/'),
+            ),
+            'Bahrain' => array(
+                array('name'=>'Manama','slug'=>'manama','acts_url'=>'https://www.klook.com/en-US/things-to-do/manama/','hotels_url'=>'https://www.klook.com/en-US/things-to-do/manama/'),
+            ),
+            'Jordan' => array(
+                array('name'=>'Amman','slug'=>'amman','acts_url'=>'https://www.klook.com/en-US/things-to-do/amman/','hotels_url'=>'https://www.klook.com/en-US/things-to-do/amman/'),
+                array('name'=>'Petra','slug'=>'petra','acts_url'=>'https://www.klook.com/en-US/things-to-do/petra/','hotels_url'=>'https://www.klook.com/en-US/things-to-do/petra/'),
+                array('name'=>'Aqaba','slug'=>'aqaba','acts_url'=>'https://www.klook.com/en-US/things-to-do/aqaba/','hotels_url'=>'https://www.klook.com/en-US/things-to-do/aqaba/'),
+            ),
+            'Egypt' => array(
+                array('name'=>'Cairo','slug'=>'cairo','acts_url'=>'https://www.klook.com/en-US/things-to-do/cairo/','hotels_url'=>'https://www.klook.com/en-US/things-to-do/cairo/'),
+                array('name'=>'Luxor','slug'=>'luxor','acts_url'=>'https://www.klook.com/en-US/things-to-do/luxor/','hotels_url'=>'https://www.klook.com/en-US/things-to-do/luxor/'),
+                array('name'=>'Hurghada','slug'=>'hurghada','acts_url'=>'https://www.klook.com/en-US/things-to-do/hurghada/','hotels_url'=>'https://www.klook.com/en-US/things-to-do/hurghada/'),
+                array('name'=>'Sharm el-Sheikh','slug'=>'sharm-el-sheikh','acts_url'=>'https://www.klook.com/en-US/things-to-do/sharm-el-sheikh/','hotels_url'=>'https://www.klook.com/en-US/things-to-do/sharm-el-sheikh/'),
+            ),
+            'Turkey' => array(
+                array('name'=>'Istanbul','slug'=>'istanbul','acts_url'=>'https://www.klook.com/en-US/things-to-do/istanbul/','hotels_url'=>'https://www.klook.com/en-US/things-to-do/istanbul/'),
+                array('name'=>'Cappadocia','slug'=>'cappadocia','acts_url'=>'https://www.klook.com/en-US/things-to-do/cappadocia/','hotels_url'=>'https://www.klook.com/en-US/things-to-do/cappadocia/'),
+                array('name'=>'Antalya','slug'=>'antalya','acts_url'=>'https://www.klook.com/en-US/things-to-do/antalya/','hotels_url'=>'https://www.klook.com/en-US/things-to-do/antalya/'),
+                array('name'=>'Bodrum','slug'=>'bodrum','acts_url'=>'https://www.klook.com/en-US/things-to-do/bodrum/','hotels_url'=>'https://www.klook.com/en-US/things-to-do/bodrum/'),
+            ),
+            'Thailand' => array(
+                array('name'=>'Bangkok','slug'=>'bangkok','acts_url'=>'https://www.klook.com/en-US/things-to-do/bangkok/','hotels_url'=>'https://www.klook.com/en-US/things-to-do/bangkok/'),
+                array('name'=>'Phuket','slug'=>'phuket','acts_url'=>'https://www.klook.com/en-US/things-to-do/phuket/','hotels_url'=>'https://www.klook.com/en-US/things-to-do/phuket/'),
+                array('name'=>'Chiang Mai','slug'=>'chiang-mai','acts_url'=>'https://www.klook.com/en-US/things-to-do/chiang-mai/','hotels_url'=>'https://www.klook.com/en-US/things-to-do/chiang-mai/'),
+                array('name'=>'Pattaya','slug'=>'pattaya','acts_url'=>'https://www.klook.com/en-US/things-to-do/pattaya/','hotels_url'=>'https://www.klook.com/en-US/things-to-do/pattaya/'),
+                array('name'=>'Koh Samui','slug'=>'koh-samui','acts_url'=>'https://www.klook.com/en-US/things-to-do/koh-samui/','hotels_url'=>'https://www.klook.com/en-US/things-to-do/koh-samui/'),
+            ),
+            'Singapore' => array(
+                array('name'=>'Singapore','slug'=>'singapore','acts_url'=>'https://www.klook.com/en-US/things-to-do/singapore/','hotels_url'=>'https://www.klook.com/en-US/things-to-do/singapore/'),
+            ),
+            'Malaysia' => array(
+                array('name'=>'Kuala Lumpur','slug'=>'kuala-lumpur','acts_url'=>'https://www.klook.com/en-US/things-to-do/kuala-lumpur/','hotels_url'=>'https://www.klook.com/en-US/things-to-do/kuala-lumpur/'),
+                array('name'=>'Langkawi','slug'=>'langkawi','acts_url'=>'https://www.klook.com/en-US/things-to-do/langkawi/','hotels_url'=>'https://www.klook.com/en-US/things-to-do/langkawi/'),
+                array('name'=>'Penang','slug'=>'penang','acts_url'=>'https://www.klook.com/en-US/things-to-do/penang/','hotels_url'=>'https://www.klook.com/en-US/things-to-do/penang/'),
+            ),
+            'Indonesia' => array(
+                array('name'=>'Bali','slug'=>'bali','acts_url'=>'https://www.klook.com/en-US/things-to-do/bali/','hotels_url'=>'https://www.klook.com/en-US/things-to-do/bali/'),
+                array('name'=>'Jakarta','slug'=>'jakarta','acts_url'=>'https://www.klook.com/en-US/things-to-do/jakarta/','hotels_url'=>'https://www.klook.com/en-US/things-to-do/jakarta/'),
+                array('name'=>'Lombok','slug'=>'lombok','acts_url'=>'https://www.klook.com/en-US/things-to-do/lombok/','hotels_url'=>'https://www.klook.com/en-US/things-to-do/lombok/'),
+                array('name'=>'Yogyakarta','slug'=>'yogyakarta','acts_url'=>'https://www.klook.com/en-US/things-to-do/yogyakarta/','hotels_url'=>'https://www.klook.com/en-US/things-to-do/yogyakarta/'),
+            ),
+            'Vietnam' => array(
+                array('name'=>'Hanoi','slug'=>'hanoi','acts_url'=>'https://www.klook.com/en-US/things-to-do/hanoi/','hotels_url'=>'https://www.klook.com/en-US/things-to-do/hanoi/'),
+                array('name'=>'Ho Chi Minh City','slug'=>'ho-chi-minh-city','acts_url'=>'https://www.klook.com/en-US/things-to-do/ho-chi-minh-city/','hotels_url'=>'https://www.klook.com/en-US/things-to-do/ho-chi-minh-city/'),
+                array('name'=>'Da Nang','slug'=>'da-nang','acts_url'=>'https://www.klook.com/en-US/things-to-do/da-nang/','hotels_url'=>'https://www.klook.com/en-US/things-to-do/da-nang/'),
+                array('name'=>'Hoi An','slug'=>'hoi-an','acts_url'=>'https://www.klook.com/en-US/things-to-do/hoi-an/','hotels_url'=>'https://www.klook.com/en-US/things-to-do/hoi-an/'),
+                array('name'=>'Ha Long Bay','slug'=>'ha-long-bay','acts_url'=>'https://www.klook.com/en-US/things-to-do/ha-long-bay/','hotels_url'=>'https://www.klook.com/en-US/things-to-do/ha-long-bay/'),
+            ),
+            'Japan' => array(
+                array('name'=>'Tokyo','slug'=>'tokyo','acts_url'=>'https://www.klook.com/en-US/things-to-do/tokyo/','hotels_url'=>'https://www.klook.com/en-US/things-to-do/tokyo/'),
+                array('name'=>'Osaka','slug'=>'osaka','acts_url'=>'https://www.klook.com/en-US/things-to-do/osaka/','hotels_url'=>'https://www.klook.com/en-US/things-to-do/osaka/'),
+                array('name'=>'Kyoto','slug'=>'kyoto','acts_url'=>'https://www.klook.com/en-US/things-to-do/kyoto/','hotels_url'=>'https://www.klook.com/en-US/things-to-do/kyoto/'),
+                array('name'=>'Hokkaido','slug'=>'hokkaido','acts_url'=>'https://www.klook.com/en-US/things-to-do/hokkaido/','hotels_url'=>'https://www.klook.com/en-US/things-to-do/hokkaido/'),
+            ),
+            'South Korea' => array(
+                array('name'=>'Seoul','slug'=>'seoul','acts_url'=>'https://www.klook.com/en-US/things-to-do/seoul/','hotels_url'=>'https://www.klook.com/en-US/things-to-do/seoul/'),
+                array('name'=>'Busan','slug'=>'busan','acts_url'=>'https://www.klook.com/en-US/things-to-do/busan/','hotels_url'=>'https://www.klook.com/en-US/things-to-do/busan/'),
+                array('name'=>'Jeju','slug'=>'jeju','acts_url'=>'https://www.klook.com/en-US/things-to-do/jeju/','hotels_url'=>'https://www.klook.com/en-US/things-to-do/jeju/'),
+            ),
+            'France' => array(
+                array('name'=>'Paris','slug'=>'paris','acts_url'=>'https://www.klook.com/en-US/things-to-do/paris/','hotels_url'=>'https://www.klook.com/en-US/things-to-do/paris/'),
+                array('name'=>'Nice','slug'=>'nice','acts_url'=>'https://www.klook.com/en-US/things-to-do/nice/','hotels_url'=>'https://www.klook.com/en-US/things-to-do/nice/'),
+            ),
+            'Italy' => array(
+                array('name'=>'Rome','slug'=>'rome','acts_url'=>'https://www.klook.com/en-US/things-to-do/rome/','hotels_url'=>'https://www.klook.com/en-US/things-to-do/rome/'),
+                array('name'=>'Venice','slug'=>'venice','acts_url'=>'https://www.klook.com/en-US/things-to-do/venice/','hotels_url'=>'https://www.klook.com/en-US/things-to-do/venice/'),
+                array('name'=>'Florence','slug'=>'florence','acts_url'=>'https://www.klook.com/en-US/things-to-do/florence/','hotels_url'=>'https://www.klook.com/en-US/things-to-do/florence/'),
+                array('name'=>'Milan','slug'=>'milan','acts_url'=>'https://www.klook.com/en-US/things-to-do/milan/','hotels_url'=>'https://www.klook.com/en-US/things-to-do/milan/'),
+            ),
+            'Spain' => array(
+                array('name'=>'Barcelona','slug'=>'barcelona','acts_url'=>'https://www.klook.com/en-US/things-to-do/barcelona/','hotels_url'=>'https://www.klook.com/en-US/things-to-do/barcelona/'),
+                array('name'=>'Madrid','slug'=>'madrid','acts_url'=>'https://www.klook.com/en-US/things-to-do/madrid/','hotels_url'=>'https://www.klook.com/en-US/things-to-do/madrid/'),
+                array('name'=>'Seville','slug'=>'seville','acts_url'=>'https://www.klook.com/en-US/things-to-do/seville/','hotels_url'=>'https://www.klook.com/en-US/things-to-do/seville/'),
+            ),
+            'Greece' => array(
+                array('name'=>'Athens','slug'=>'athens','acts_url'=>'https://www.klook.com/en-US/things-to-do/athens/','hotels_url'=>'https://www.klook.com/en-US/things-to-do/athens/'),
+                array('name'=>'Santorini','slug'=>'santorini','acts_url'=>'https://www.klook.com/en-US/things-to-do/santorini/','hotels_url'=>'https://www.klook.com/en-US/things-to-do/santorini/'),
+                array('name'=>'Mykonos','slug'=>'mykonos','acts_url'=>'https://www.klook.com/en-US/things-to-do/mykonos/','hotels_url'=>'https://www.klook.com/en-US/things-to-do/mykonos/'),
+            ),
+            'UK' => array(
+                array('name'=>'London','slug'=>'london','acts_url'=>'https://www.klook.com/en-US/things-to-do/london/','hotels_url'=>'https://www.klook.com/en-US/things-to-do/london/'),
+                array('name'=>'Edinburgh','slug'=>'edinburgh','acts_url'=>'https://www.klook.com/en-US/things-to-do/edinburgh/','hotels_url'=>'https://www.klook.com/en-US/things-to-do/edinburgh/'),
+            ),
+            'Australia' => array(
+                array('name'=>'Sydney','slug'=>'sydney','acts_url'=>'https://www.klook.com/en-US/things-to-do/sydney/','hotels_url'=>'https://www.klook.com/en-US/things-to-do/sydney/'),
+                array('name'=>'Melbourne','slug'=>'melbourne','acts_url'=>'https://www.klook.com/en-US/things-to-do/melbourne/','hotels_url'=>'https://www.klook.com/en-US/things-to-do/melbourne/'),
+                array('name'=>'Brisbane','slug'=>'brisbane','acts_url'=>'https://www.klook.com/en-US/things-to-do/brisbane/','hotels_url'=>'https://www.klook.com/en-US/things-to-do/brisbane/'),
+                array('name'=>'Gold Coast','slug'=>'gold-coast','acts_url'=>'https://www.klook.com/en-US/things-to-do/gold-coast/','hotels_url'=>'https://www.klook.com/en-US/things-to-do/gold-coast/'),
+            ),
+            'USA' => array(
+                array('name'=>'New York','slug'=>'new-york','acts_url'=>'https://www.klook.com/en-US/things-to-do/new-york/','hotels_url'=>'https://www.klook.com/en-US/things-to-do/new-york/'),
+                array('name'=>'Los Angeles','slug'=>'los-angeles','acts_url'=>'https://www.klook.com/en-US/things-to-do/los-angeles/','hotels_url'=>'https://www.klook.com/en-US/things-to-do/los-angeles/'),
+                array('name'=>'Las Vegas','slug'=>'las-vegas','acts_url'=>'https://www.klook.com/en-US/things-to-do/las-vegas/','hotels_url'=>'https://www.klook.com/en-US/things-to-do/las-vegas/'),
+                array('name'=>'Orlando','slug'=>'orlando','acts_url'=>'https://www.klook.com/en-US/things-to-do/orlando/','hotels_url'=>'https://www.klook.com/en-US/things-to-do/orlando/'),
+                array('name'=>'Miami','slug'=>'miami','acts_url'=>'https://www.klook.com/en-US/things-to-do/miami/','hotels_url'=>'https://www.klook.com/en-US/things-to-do/miami/'),
+            ),
         );
 
-        $nonce        = wp_create_nonce('fth_import_publish');
-        $ajax_url     = admin_url('admin-ajax.php');
+        // Build world cities flat list (for "World" mode)
+        $world_cities = array();
+        foreach ($country_cities_static as $country_name => $cities) {
+            foreach ($cities as $c) {
+                $world_cities[] = array_merge($c, array('country' => $country_name));
+            }
+        }
+
+        // Build JS country list with city counts for dropdown
+        $js_country_list = array();
+        foreach ($country_cities_static as $country_name => $cities) {
+            $js_country_list[] = array('name' => $country_name, 'cities' => $cities);
+        }
+
+        $nonce    = wp_create_nonce('fth_import_publish');
+        $ajax_url = admin_url('admin-ajax.php');
         ?>
         <style>
         #fth-marathon-wrap{font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,sans-serif;background:#0f172a;min-height:100vh;padding:0;margin:-10px -20px -20px;color:#fff}
@@ -2583,28 +2633,29 @@ if (document.readyState === 'loading') {
         </div>
 
         <div class="fm-card fm-panel-hidden" id="fm-scope-country">
-            <h3>Pays à importer</h3>
-            <div class="fm-label">Pays</div>
-            <select class="fm-select" id="fm_country_select" style="max-width:360px">
+            <h3>Pays à importer — activités &amp; hôtels de toutes ses villes</h3>
+            <div class="fm-label">Sélectionner un pays</div>
+            <select class="fm-select" id="fm_country_select" style="max-width:400px">
                 <option value="">— Choisir un pays —</option>
-                <?php foreach ($js_countries as $co): ?>
-                <option value="<?php echo $co['id']; ?>"><?php echo esc_html($co['name']); ?> (<?php echo count($co['cities']); ?> villes)</option>
+                <?php foreach ($js_country_list as $co): ?>
+                <option value="<?php echo esc_attr($co['name']); ?>"><?php echo esc_html($co['name']); ?> (<?php echo count($co['cities']); ?> villes)</option>
                 <?php endforeach; ?>
             </select>
-            <p style="margin:10px 0 0;font-size:12px;opacity:.6;">Toutes les villes de ce pays seront importées séquentiellement.</p>
+            <p style="margin:10px 0 0;font-size:12px;color:#34d399;">✅ Pour chaque ville : découverte des activités + hôtels sur Klook → import des posts WP avec photos, prix, description, itinéraire…</p>
         </div>
 
         <div class="fm-card fm-panel-hidden" id="fm-scope-allcities">
-            <h3>Toutes mes villes (<?php echo count($cities_terms); ?> villes en base)</h3>
-            <p style="margin:0;font-size:13px;opacity:.8;">Le marathon passera par toutes les villes enregistrées dans Travel Hub.</p>
+            <h3>Toutes mes villes enregistrées (<?php echo count($cities_terms); ?> villes en base WP)</h3>
+            <p style="margin:0 0 8px;font-size:13px;color:#34d399;">✅ Pour chaque ville : découverte des activités + hôtels sur Klook → import complet.</p>
+            <p style="margin:0;font-size:12px;opacity:.6;">Utilise les villes déjà présentes dans Travel Hub → Cities.</p>
         </div>
 
         <div class="fm-card fm-panel-hidden" id="fm-scope-world">
-            <h3>Monde entier — <?php echo count($world_cities); ?> grandes villes Klook</h3>
-            <p style="margin:0 0 10px;font-size:13px;opacity:.8;">Importe depuis toutes les grandes destinations mondiales disponibles sur Klook.</p>
-            <div style="display:flex;flex-wrap:wrap;gap:6px;">
+            <h3>🌐 Toutes destinations Klook — <?php echo count($world_cities); ?> villes dans <?php echo count($js_country_list); ?> pays</h3>
+            <p style="margin:0 0 10px;font-size:13px;color:#34d399;">✅ Import de TOUTES les activités + hôtels pour chaque destination. Peut durer plusieurs heures — le marathon ne s'arrête pas.</p>
+            <div style="display:flex;flex-wrap:wrap;gap:5px;max-height:120px;overflow-y:auto;">
                 <?php foreach ($world_cities as $wc): ?>
-                <span style="background:rgba(255,255,255,.1);border-radius:20px;padding:3px 10px;font-size:11px;"><?php echo esc_html($wc['name']); ?></span>
+                <span style="background:rgba(255,255,255,.08);border-radius:20px;padding:2px 8px;font-size:11px;"><?php echo esc_html($wc['name']); ?></span>
                 <?php endforeach; ?>
             </div>
         </div>
@@ -2644,6 +2695,19 @@ if (document.readyState === 'loading') {
             </div>
         </div>
 
+        <!-- Resume banner (hidden until a saved state is detected) -->
+        <div class="fm-card" id="fm-resume-banner" style="display:none;background:rgba(52,211,153,.12);border:1px solid #34d399;">
+            <div style="display:flex;align-items:center;gap:14px;flex-wrap:wrap;">
+                <span style="font-size:20px;">💾</span>
+                <div style="flex:1;min-width:0;">
+                    <div style="font-weight:800;font-size:14px;color:#34d399;">Session précédente détectée</div>
+                    <div style="font-size:12px;opacity:.8;" id="fm_resume_info"></div>
+                </div>
+                <button class="fm-btn-start" id="fm_resume" style="background:linear-gradient(135deg,#059669,#34d399);">▶ Reprendre</button>
+                <button style="background:rgba(255,255,255,.1);color:#fff;border:1px solid rgba(255,255,255,.3);padding:8px 16px;border-radius:8px;cursor:pointer;font-size:12px;" id="fm_discard_state">✕ Ignorer</button>
+            </div>
+        </div>
+
         <!-- Controls -->
         <div class="fm-card">
             <div class="fm-actions">
@@ -2651,6 +2715,12 @@ if (document.readyState === 'loading') {
                 <button class="fm-btn-stop"  id="fm_stop">⏹ Arrêter</button>
                 <button class="fm-btn-reset" id="fm_reset">🔄 Réinitialiser</button>
                 <span id="fm_phase" style="font-size:13px;opacity:.7;"></span>
+            </div>
+            <div style="margin-top:10px;display:flex;align-items:center;gap:8px;">
+                <label style="display:flex;align-items:center;gap:6px;font-size:12px;cursor:pointer;color:rgba(255,255,255,.75);">
+                    <input type="checkbox" id="fm_force_update" style="width:14px;height:14px;">
+                    <span>Forcer la mise à jour (réimporter même les éléments déjà en base)</span>
+                </label>
             </div>
         </div>
 
@@ -2677,8 +2747,8 @@ if (document.readyState === 'loading') {
             var AJAX_URL  = <?php echo json_encode($ajax_url); ?>;
             var NONCE     = <?php echo json_encode($nonce); ?>;
             var ALL_CITIES   = <?php echo json_encode(array_values($js_cities)); ?>;
-            var ALL_COUNTRIES= <?php echo json_encode(array_values($js_countries)); ?>;
-            var WORLD_CITIES = <?php echo json_encode($world_cities); ?>;
+            var COUNTRY_CITIES = <?php echo json_encode($js_country_list); ?>;
+            var WORLD_CITIES   = <?php echo json_encode($world_cities); ?>;
 
             var currentMode = 'city';
             var currentType = 'both';
@@ -2691,6 +2761,11 @@ if (document.readyState === 'loading') {
             var startBtn      = document.getElementById('fm_start');
             var stopBtn       = document.getElementById('fm_stop');
             var resetBtn      = document.getElementById('fm_reset');
+            var resumeBtn     = document.getElementById('fm_resume');
+            var resumeBanner  = document.getElementById('fm-resume-banner');
+            var resumeInfo    = document.getElementById('fm_resume_info');
+            var discardBtn    = document.getElementById('fm_discard_state');
+            var forceUpdateEl = document.getElementById('fm_force_update');
             var progressCard  = document.getElementById('fm-progress-card');
             var progressBar   = document.getElementById('fm_progress_bar');
             var currentSpan   = document.getElementById('fm_current');
@@ -2701,6 +2776,52 @@ if (document.readyState === 'loading') {
             var sErrors       = document.getElementById('fm_s_errors');
             var sSkipped      = document.getElementById('fm_s_skipped');
             var sRemaining    = document.getElementById('fm_s_remaining');
+
+            // ── State persistence (localStorage) ─────────────────────
+            var STATE_KEY = 'fth_marathon_state_v3';
+
+            function saveState(cityQueue, ci) {
+                try {
+                    localStorage.setItem(STATE_KEY, JSON.stringify({
+                        cityQueue: cityQueue,
+                        ci:        ci,
+                        mode:      currentMode,
+                        type:      currentType,
+                        imported:  imported,
+                        errors:    errors,
+                        skipped:   skipped,
+                        ts:        Date.now()
+                    }));
+                } catch(e) {}
+            }
+
+            function loadState() {
+                try {
+                    var raw = localStorage.getItem(STATE_KEY);
+                    if (!raw) return null;
+                    var s = JSON.parse(raw);
+                    // Only restore states less than 72 hours old
+                    if (!s || !s.ts || (Date.now() - s.ts) > 72 * 3600 * 1000) return null;
+                    if (!s.cityQueue || !s.cityQueue.length) return null;
+                    return s;
+                } catch(e) { return null; }
+            }
+
+            function clearState() {
+                try { localStorage.removeItem(STATE_KEY); } catch(e) {}
+            }
+
+            // ── Check for resumable session on page load ───────────────
+            (function checkResume() {
+                var s = loadState();
+                if (!s) return;
+                var elapsed = Math.round((Date.now() - s.ts) / 60000);
+                var timeStr = elapsed < 60 ? elapsed + ' min ago' : Math.round(elapsed/60) + 'h ago';
+                var done    = s.ci || 0;
+                var total   = s.cityQueue ? s.cityQueue.length : 0;
+                resumeInfo.textContent = 'Mode: ' + (s.mode||'?') + ' | ' + done + '/' + total + ' villes traitées | ' + (s.imported||0) + ' importés, ' + (s.errors||0) + ' erreurs | Sauvegardé ' + timeStr;
+                resumeBanner.style.display = '';
+            })();
 
             // ── Mode buttons ──────────────────────────────────────────
             document.querySelectorAll('.fm-mode-btn').forEach(function(btn) {
@@ -2730,12 +2851,14 @@ if (document.readyState === 'loading') {
             stopBtn.addEventListener('click', function() {
                 stopped = true;
                 stopBtn.style.display = 'none';
-                log('⏹ Arrêt demandé — attente de la fin du téléchargement en cours…', '#fbbf24');
+                log('⏹ Arrêt demandé — la progression est sauvegardée, vous pourrez reprendre.', '#fbbf24');
             });
-            resetBtn.addEventListener('click', function() {
-                if (running && !confirm('L\'import est en cours. Vraiment réinitialiser ?')) return;
+
+            function doReset() {
                 stopped = true; running = false;
                 imported = errors = skipped = remaining = discovered = 0;
+                clearState();
+                resumeBanner.style.display = 'none';
                 updateStats();
                 progressBar.style.width = '0%';
                 currentSpan.textContent = 'En attente…';
@@ -2745,6 +2868,16 @@ if (document.readyState === 'loading') {
                 startBtn.disabled = false; startBtn.textContent = '🚀 Lancer le Marathon';
                 stopBtn.style.display = 'none';
                 phaseSpan.textContent = '';
+            }
+
+            resetBtn.addEventListener('click', function() {
+                if (running && !confirm('L\'import est en cours. Vraiment réinitialiser ?')) return;
+                doReset();
+            });
+
+            if (discardBtn) discardBtn.addEventListener('click', function() {
+                clearState();
+                resumeBanner.style.display = 'none';
             });
 
             // ── AJAX helper ───────────────────────────────────────────
@@ -2786,79 +2919,112 @@ if (document.readyState === 'loading') {
             }
 
             // ── Build city queue ──────────────────────────────────────
+            function slugify(s) {
+                return String(s).toLowerCase().replace(/\s+/g,'-').replace(/[^a-z0-9-]/g,'');
+            }
+
             function buildCityQueue() {
                 var queue = [];
                 if (currentMode === 'city') {
                     var sel = document.getElementById('fm_city_select');
                     var manUrl = (document.getElementById('fm_city_url').value || '').trim();
                     if (manUrl) {
-                        queue.push({name: manUrl.replace(/^https?:\/\/[^\/]+/,'').replace(/\/+$/,''), slug: '', url: manUrl, id: 0, country_id: 0});
+                        queue.push({name: manUrl.replace(/^https?:\/\/[^\/]+/,'').replace(/\/+$/,''), slug: '', url: manUrl, id: 0, country_id: 0, country_name: '', country_slug: ''});
                     } else if (sel && sel.value) {
                         var opt = sel.options[sel.selectedIndex];
-                        queue.push({name: opt.dataset.name, slug: opt.dataset.slug, url: opt.dataset.url, id: parseInt(sel.value)||0, country_id: 0});
+                        queue.push({name: opt.dataset.name || '', slug: opt.dataset.slug || '', url: opt.dataset.url || '', id: parseInt(sel.value)||0, country_id: 0, country_name: '', country_slug: ''});
                     }
                 } else if (currentMode === 'country') {
                     var csel = document.getElementById('fm_country_select');
                     if (csel && csel.value) {
-                        var cid = parseInt(csel.value);
-                        ALL_COUNTRIES.forEach(function(co){ if (co.id === cid) { queue = co.cities.slice(); } });
+                        var selCountryName = csel.value;
+                        var selCountrySlug = slugify(selCountryName);
+                        COUNTRY_CITIES.forEach(function(co) {
+                            if (co.name === selCountryName) {
+                                co.cities.forEach(function(c) {
+                                    queue.push({name: c.name, slug: c.slug, url: c.acts_url, hotels_url: c.hotels_url,
+                                        id: 0, country_id: 0, country_name: selCountryName, country_slug: selCountrySlug});
+                                });
+                            }
+                        });
                     }
                 } else if (currentMode === 'allcities') {
-                    queue = ALL_CITIES.slice();
+                    queue = ALL_CITIES.map(function(c){
+                        return Object.assign({country_name: '', country_slug: ''}, c);
+                    });
                 } else if (currentMode === 'world') {
                     WORLD_CITIES.forEach(function(wc){
-                        queue.push({name: wc.name, slug: wc.slug, url: wc.url, id: 0, country_id: 0});
+                        var cname = wc.country || '';
+                        queue.push({name: wc.name, slug: wc.slug, url: wc.acts_url || wc.url, hotels_url: wc.hotels_url || wc.url,
+                            id: 0, country_id: 0, country_name: cname, country_slug: slugify(cname)});
                     });
                 }
                 return queue;
             }
 
-            // ── Main marathon runner ──────────────────────────────────
-            startBtn.addEventListener('click', async function() {
-                if (running) return;
-                var cityQueue = buildCityQueue();
-                if (!cityQueue.length) { alert('Veuillez sélectionner une ville ou un pays.'); return; }
-
+            // ── Core marathon runner (shared by start + resume) ───────
+            async function runMarathon(cityQueue, startCi, resumeStats) {
                 stopped  = false; running = true;
-                imported = errors = skipped = remaining = discovered = 0;
+                if (resumeStats) {
+                    imported  = resumeStats.imported  || 0;
+                    errors    = resumeStats.errors    || 0;
+                    skipped   = resumeStats.skipped   || 0;
+                    discovered = 0; remaining = 0;
+                } else {
+                    imported = errors = skipped = remaining = discovered = 0;
+                }
                 updateStats();
                 progressCard.style.display = '';
                 startBtn.disabled = true; startBtn.textContent = '⏳ En cours…';
+                if (resumeBtn) resumeBtn.disabled = true;
                 stopBtn.style.display = '';
-                progressBar.style.width = '0%';
+                if (!resumeStats) progressBar.style.width = '0%';
                 logEl.innerHTML = '';
+                resumeBanner.style.display = 'none';
 
-                var wpCity    = document.getElementById('fm_wp_city').value    || '';
-                var wpCountry = document.getElementById('fm_wp_country').value || '';
-                var types     = currentType === 'both' ? ['activity','hotel'] : [currentType];
+                var wpCity       = document.getElementById('fm_wp_city').value    || '';
+                var wpCountry    = document.getElementById('fm_wp_country').value || '';
+                var types        = currentType === 'both' ? ['activity','hotel'] : [currentType];
+                var forceUpdate  = forceUpdateEl && forceUpdateEl.checked ? 1 : 0;
 
-                for (var ci = 0; ci < cityQueue.length && !stopped; ci++) {
+                for (var ci = startCi; ci < cityQueue.length && !stopped; ci++) {
                     var cityInfo = cityQueue[ci];
                     phaseSpan.textContent = 'Ville ' + (ci+1) + '/' + cityQueue.length + ' — ' + cityInfo.name;
+                    // Save position before starting each city so resume works
+                    saveState(cityQueue, ci);
 
                     for (var ti = 0; ti < types.length && !stopped; ti++) {
                         var type = types[ti];
-                        var klookUrl = cityInfo.url;
-                        // For hotel mode, swap to hotel tab if URL is activity tab
-                        if (type === 'hotel' && klookUrl.indexOf('1-things-to-do') !== -1) {
-                            klookUrl = klookUrl.replace('1-things-to-do', '3-hotel');
+                        // Use dedicated hotels_url if available, otherwise swap tab in acts_url
+                        var klookUrl;
+                        if (type === 'hotel' && cityInfo.hotels_url) {
+                            klookUrl = cityInfo.hotels_url;
+                        } else {
+                            klookUrl = cityInfo.url;
+                            if (type === 'hotel' && klookUrl.indexOf('1-things-to-do') !== -1) {
+                                klookUrl = klookUrl.replace('1-things-to-do', '3-hotel');
+                            }
                         }
 
-                        currentSpan.textContent = '🔍 Découverte des ' + (type === 'hotel' ? 'hôtels' : 'activités') + ' pour ' + cityInfo.name + '…';
-                        log('🔍 Découverte ' + type + 's — ' + cityInfo.name, '#60a5fa');
+                        var typeLabel = type === 'hotel' ? 'hôtels' : 'activités';
+                        currentSpan.textContent = '🔍 Découverte des ' + typeLabel + ' pour ' + cityInfo.name + '…';
+                        log('🔍 Découverte ' + typeLabel + ' — ' + cityInfo.name, '#60a5fa');
 
                         var discRes = await ajaxPost({
-                            action: 'fth_discover_import_urls',
-                            url:    klookUrl,
-                            type:   type,
-                            city:   cityInfo.id || '',
-                            limit:  200,
-                            nonce:  NONCE
+                            action:       'fth_discover_import_urls',
+                            url:          klookUrl,
+                            type:         type,
+                            city:         cityInfo.id || '',
+                            limit:        200,
+                            force_update: forceUpdate,
+                            nonce:        NONCE
                         });
 
                         if (!discRes.success || !discRes.data || !discRes.data.urls || !discRes.data.urls.length) {
                             var msg = discRes.data && discRes.data.message ? discRes.data.message : 'Aucun résultat';
-                            log('⚠️ ' + cityInfo.name + ' (' + type + '): ' + msg, '#fbbf24');
+                            log('⚠️ ' + cityInfo.name + ' (' + typeLabel + '): ' + msg, '#fbbf24');
+                            skipped += (discRes.data && discRes.data.skipped) ? discRes.data.skipped : 0;
+                            updateStats();
                             continue;
                         }
 
@@ -2867,7 +3033,8 @@ if (document.readyState === 'loading') {
                         discovered += urls.length;
                         remaining   = urls.length;
                         updateStats();
-                        log('✅ ' + urls.length + ' ' + type + '(s) trouvés pour ' + cityInfo.name, '#34d399');
+                        var existingLabel = forceUpdate ? ' (mise à jour forcée)' : '';
+                        log('✅ ' + urls.length + ' ' + typeLabel + ' à importer pour ' + cityInfo.name + existingLabel, '#34d399');
 
                         for (var ui = 0; ui < urls.length && !stopped; ui++) {
                             var itemUrl = urls[ui];
@@ -2875,18 +3042,27 @@ if (document.readyState === 'loading') {
                             currentSpan.textContent = '⬇️ Import ' + (ui+1) + '/' + urls.length + ' — ' + itemUrl.split('/').slice(-2,-1)[0];
                             updateStats();
 
-                            var useCity    = cityInfo.id    || wpCity    || '';
-                            var useCountry = cityInfo.country_id || wpCountry || '';
+                            // Use resolved WP IDs when available; always pass name/slug as fallback
+                            // so PHP can auto-create/find the correct terms per city
+                            var useCity    = cityInfo.id         || 0;
+                            var useCountry = cityInfo.country_id || 0;
+                            // Only fall back to WP selector if city has no name info at all
+                            if (!useCity && !cityInfo.name && wpCity)    useCity    = wpCity;
+                            if (!useCountry && !cityInfo.country_name && wpCountry) useCountry = wpCountry;
 
                             var impRes = await ajaxPost({
-                                action:  'fth_import_single_live',
-                                url:     itemUrl,
-                                type:    type,
-                                city:    useCity,
-                                country: useCountry,
-                                category:'',
-                                publish: 1,
-                                nonce:   NONCE
+                                action:        'fth_import_single_live',
+                                url:           itemUrl,
+                                type:          type,
+                                city:          useCity,
+                                city_name:     cityInfo.name         || '',
+                                city_slug:     cityInfo.slug         || '',
+                                country:       useCountry,
+                                country_name:  cityInfo.country_name || '',
+                                country_slug:  cityInfo.country_slug || '',
+                                category:      '',
+                                publish:       1,
+                                nonce:         NONCE
                             });
 
                             if (impRes && impRes.success) {
@@ -2902,21 +3078,60 @@ if (document.readyState === 'loading') {
                         remaining = 0;
                         updateStats();
                     }
+                    // Save progress after completing each city
+                    saveState(cityQueue, ci + 1);
                 }
 
                 // Done
                 running = false;
                 startBtn.disabled = false; startBtn.textContent = '🚀 Lancer le Marathon';
+                if (resumeBtn) resumeBtn.disabled = false;
                 stopBtn.style.display = 'none';
-                progressBar.style.width = '100%';
+                progressBar.style.width = stopped ? progressBar.style.width : '100%';
+
                 if (stopped) {
                     currentSpan.textContent = '⏹ Arrêté — ' + imported + ' importés, ' + errors + ' erreurs';
-                    log('⏹ Marathon arrêté manuellement.', '#fbbf24');
+                    log('⏹ Marathon arrêté. Progression sauvegardée — cliquez "Reprendre" pour continuer.', '#fbbf24');
+                    // Show resume banner with updated state
+                    var s = loadState();
+                    if (s) {
+                        var done2 = s.ci || 0, total2 = s.cityQueue ? s.cityQueue.length : 0;
+                        resumeInfo.textContent = 'Mode: ' + (s.mode||'?') + ' | ' + done2 + '/' + total2 + ' villes | ' + (s.imported||0) + ' importés, ' + (s.errors||0) + ' erreurs | Sauvegardé à l\'instant';
+                        resumeBanner.style.display = '';
+                    }
                 } else {
+                    clearState();
                     currentSpan.textContent = '🎉 Terminé — ' + imported + ' importés, ' + errors + ' erreurs, ' + skipped + ' ignorés';
                     log('🎉 Marathon terminé ! ' + imported + ' importés, ' + errors + ' erreurs.', '#34d399');
                     phaseSpan.textContent = 'Terminé';
                 }
+            }
+
+            // ── Start button ──────────────────────────────────────────
+            startBtn.addEventListener('click', async function() {
+                if (running) return;
+                var cityQueue = buildCityQueue();
+                if (!cityQueue.length) { alert('Veuillez sélectionner une ville ou un pays.'); return; }
+                await runMarathon(cityQueue, 0, null);
+            });
+
+            // ── Resume button ─────────────────────────────────────────
+            if (resumeBtn) resumeBtn.addEventListener('click', async function() {
+                if (running) return;
+                var s = loadState();
+                if (!s || !s.cityQueue || !s.cityQueue.length) { alert('Aucune session à reprendre.'); return; }
+                // Restore mode/type from saved state
+                currentMode = s.mode || currentMode;
+                currentType = s.type || currentType;
+                // Sync UI buttons
+                document.querySelectorAll('.fm-mode-btn').forEach(function(b){ b.classList.toggle('active', b.dataset.mode === currentMode); });
+                document.querySelectorAll('.fm-type-btn').forEach(function(b){ b.classList.toggle('active', b.dataset.type === currentType); });
+                var startCi = s.ci || 0;
+                if (startCi >= s.cityQueue.length) {
+                    alert('Session déjà complète.'); clearState(); resumeBanner.style.display = 'none'; return;
+                }
+                log('▶ Reprise depuis la ville ' + (startCi+1) + '/' + s.cityQueue.length, '#34d399');
+                await runMarathon(s.cityQueue, startCi, {imported: s.imported||0, errors: s.errors||0, skipped: s.skipped||0});
             });
 
         })();
