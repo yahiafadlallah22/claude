@@ -179,6 +179,14 @@ class FTH_Admin {
             'fth-price-update',
             array(__CLASS__, 'price_update_page')
         );
+        add_submenu_page(
+            'fth-travel-hub',
+            'Diagnostic Import',
+            '🔬 Diagnostic',
+            'manage_options',
+            'fth-diagnose',
+            array(__CLASS__, 'diagnose_page')
+        );
     }
     
     /**
@@ -3369,6 +3377,92 @@ stopBtn.addEventListener('click', function(){ stopped = true; });
 
         })();
         </script>
+        <?php
+    }
+
+    /**
+     * Diagnostic page: test parse a Klook URL and show exactly what was extracted.
+     */
+    public static function diagnose_page() {
+        if (!current_user_can('manage_options')) return;
+        $nonce = wp_create_nonce('fth_import_publish');
+        ?>
+        <div class="wrap" style="max-width:900px">
+        <h1>🔬 Diagnostic Import Klook</h1>
+        <p style="color:#666">Entrez une URL Klook pour voir exactement ce que le plugin extrait — sans rien importer.</p>
+
+        <div style="background:#1e1e2e;padding:20px;border-radius:8px;margin-bottom:20px">
+            <input id="diag-url" type="text" style="width:70%;padding:10px;border-radius:6px;border:none;font-size:14px"
+                placeholder="https://www.klook.com/en-US/activity/12345-example/" />
+            <button id="diag-btn" style="margin-left:8px;padding:10px 20px;background:#7c3aed;color:#fff;border:none;border-radius:6px;cursor:pointer;font-size:14px">
+                Analyser
+            </button>
+        </div>
+
+        <div id="diag-result" style="display:none;background:#1e1e2e;color:#e2e8f0;padding:20px;border-radius:8px;font-family:monospace;font-size:13px;white-space:pre-wrap;max-height:700px;overflow-y:auto"></div>
+
+        <script>
+        document.getElementById('diag-btn').addEventListener('click', function() {
+            var url = document.getElementById('diag-url').value.trim();
+            if (!url) return;
+            var res = document.getElementById('diag-result');
+            res.style.display = 'block';
+            res.textContent = '⏳ Analyse en cours...';
+            res.style.color = '#e2e8f0';
+            var fd = new FormData();
+            fd.append('action', 'fth_diagnose_parse');
+            fd.append('nonce', '<?php echo esc_js($nonce); ?>');
+            fd.append('url', url);
+            fetch(ajaxurl, {method:'POST', body:fd})
+            .then(function(r){ return r.json(); })
+            .then(function(r) {
+                if (!r.success) { res.textContent = '❌ ' + (r.data||'Erreur'); res.style.color='#f87171'; return; }
+                var d = r.data;
+                var lines = [];
+                lines.push('═══ FETCH ═══');
+                lines.push('URL: ' + d.url);
+                lines.push('Source: ' + d.fetch_source + '  |  HTML: ' + d.html_length + ' bytes');
+                lines.push('__NEXT_DATA__: ' + (d.has_next_data ? '✅ trouvé' : '❌ ABSENT — page Cloudflare?'));
+                lines.push('dehydratedState.queries: ' + (d.has_dehydrated_state ? '✅' : '❌ absent'));
+                if (d.error) { lines.push('\n❌ ERREUR: ' + d.error); if (d.html_snippet) lines.push('HTML début: ' + d.html_snippet); }
+
+                if (d.queries && d.queries.length) {
+                    lines.push('\n═══ QUERIES (' + d.queries.length + ') ═══');
+                    d.queries.forEach(function(q, i) {
+                        var color = q.role.startsWith('PRIMARY') ? '✅ ' : q.role.startsWith('SKIP') ? '⛔ ' : '  ';
+                        lines.push(color + '[' + i + '] ' + q.role + ' | ' + q.data_type);
+                        lines.push('    hash: ' + q.hash);
+                        if (q.sample.title)       lines.push('    title: ' + q.sample.title);
+                        if (q.sample.description) lines.push('    desc:  ' + q.sample.description + '...');
+                        if (q.sample.price)       lines.push('    price: ' + q.sample.price);
+                        if (q.sample.image)       lines.push('    image: ' + q.sample.image.substring(0,80));
+                        if (q.sample.faq_count !== '0') lines.push('    faqs:  ' + q.sample.faq_count + ' items');
+                    });
+                }
+
+                lines.push('\n═══ DONNEES EXTRAITES ═══');
+                var e = d.extracted;
+                lines.push('Titre:       ' + (e.title || '❌ VIDE'));
+                lines.push('Description: ' + (e.description_len > 0 ? e.description_len + ' chars — ' + e.description_preview : '❌ VIDE → texte générique'));
+                lines.push('Prix:        ' + (e.price || '❌ VIDE'));
+                lines.push('Prix orig:   ' + (e.original_price || '—'));
+                lines.push('Devise:      ' + (e.currency || '—'));
+                lines.push('Image:       ' + (e.image ? e.image.substring(0,80) : '❌ VIDE'));
+                lines.push('Images:      ' + e.images_count + ' trouvées');
+                lines.push('Highlights:  ' + (e.highlights_len > 0 ? e.highlights_len + ' chars' : '❌ VIDE'));
+                lines.push('Itinéraire:  ' + (e.itinerary_len > 0 ? e.itinerary_len + ' chars' : '❌ VIDE'));
+                lines.push('FAQ:         ' + (e.faq_len > 0 ? e.faq_len + ' chars' : '❌ VIDE'));
+                lines.push('Note:        ' + (e.rating || '—') + '  |  Avis: ' + (e.review_count || '—'));
+
+                res.textContent = lines.join('\n');
+                // Color code
+                var hasErrors = lines.some(function(l){ return l.indexOf('❌') !== -1; });
+                res.style.color = hasErrors ? '#fbbf24' : '#4ade80';
+            })
+            .catch(function(e){ res.textContent = '❌ Erreur réseau: ' + e; res.style.color='#f87171'; });
+        });
+        </script>
+        </div>
         <?php
     }
 }

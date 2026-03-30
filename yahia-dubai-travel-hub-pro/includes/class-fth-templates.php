@@ -37,16 +37,43 @@ class FTH_Templates {
      * Template loader
      */
     public static function template_loader($template) {
+        // Detect current URL slug (handles both existing WP pages and 404 on hub slugs)
+        $req_path = isset($_SERVER['REQUEST_URI']) ? strtok(wp_unslash($_SERVER['REQUEST_URI']), '?') : '';
+        $req_slug = trim($req_path, '/');
+        // Strip language prefix (e.g. /en/, /fr/) if present
+        $req_slug = preg_replace('#^[a-z]{2}/#i', '', $req_slug);
+        // Strip trailing sub-path — keep only first segment
+        $req_slug = strtok($req_slug, '/');
+
+        // If WordPress returned a 404, try to rescue known hub slugs
+        if (is_404()) {
+            $hub_templates = array(
+                'things-to-do' => 'templates/page-things-to-do.php',
+                'hotels'       => 'templates/page-hotels.php',
+                'passes'       => 'templates/page-passes.php',
+            );
+            if (isset($hub_templates[$req_slug])) {
+                $custom = FTH_PLUGIN_DIR . $hub_templates[$req_slug];
+                if (file_exists($custom)) {
+                    // Override 404 status so the page renders normally
+                    global $wp_query;
+                    $wp_query->is_404 = false;
+                    status_header(200);
+                    return $custom;
+                }
+            }
+        }
+
         // Main Hub Page (/things-to-do/)
-        if (is_page('things-to-do') || (is_page() && get_page_by_path('things-to-do') && get_the_ID() === get_page_by_path('things-to-do')->ID)) {
+        if (is_page('things-to-do') || $req_slug === 'things-to-do') {
             $custom = FTH_PLUGIN_DIR . 'templates/page-things-to-do.php';
             if (file_exists($custom)) {
                 return $custom;
             }
         }
-        
+
         // Passes Hub Page (/passes/)
-        if (is_page('passes') || (is_page() && get_page_by_path('passes') && get_the_ID() === get_page_by_path('passes')->ID)) {
+        if (is_page('passes') || $req_slug === 'passes') {
             $custom = FTH_PLUGIN_DIR . 'templates/page-passes.php';
             if (file_exists($custom)) {
                 return $custom;
@@ -54,7 +81,7 @@ class FTH_Templates {
         }
 
         // Hotels Hub Page (/hotels/)
-        if (is_page('hotels') || (is_page() && get_page_by_path('hotels') && get_the_ID() === get_page_by_path('hotels')->ID)) {
+        if (is_page('hotels') || $req_slug === 'hotels') {
             $custom = FTH_PLUGIN_DIR . 'templates/page-hotels.php';
             if (file_exists($custom)) {
                 return $custom;

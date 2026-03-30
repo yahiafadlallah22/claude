@@ -2,8 +2,8 @@
 /**
  * Plugin Name: Yahia Dubai Travel Hub Pro
  * Plugin URI: https://flavor.ae/
- * Description: Yahia Dubai travel hub – attractions, tours and hotels imported from Klook with affiliate links, full AIOSEO automation, Klook-style design and WP Residence-safe templates. v1.33
- * Version: 1.33.0
+ * Description: Yahia Dubai travel hub – attractions, tours and hotels imported from Klook with affiliate links, full AIOSEO automation, Klook-style design and WP Residence-safe templates. v1.34
+ * Version: 1.34.0
  * Author: Flavor
  * Author URI: https://flavor.ae/
  * Text Domain: flavor-travel-hub

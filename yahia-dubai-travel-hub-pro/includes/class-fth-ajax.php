@@ -56,6 +56,8 @@ class FTH_Ajax {
         // Price update: get list of post IDs / update single post price
         add_action('wp_ajax_fth_price_update_queue',  array(__CLASS__, 'price_update_queue'));
         add_action('wp_ajax_fth_price_update_single', array(__CLASS__, 'price_update_single'));
+        // Diagnostic: test parsing of a Klook URL without importing
+        add_action('wp_ajax_fth_diagnose_parse', array(__CLASS__, 'diagnose_parse'));
     }
     
 
@@ -3442,19 +3444,21 @@ if ($next_data_raw !== '') {
                 if ($is_list) continue; // skip for text extraction but URL already saved for image fallback
 
                 // Try to find the query that matches our specific activity_id (from URL)
+                // Deep search: Klook may nest the activityId under sub-objects like data.activityId
                 if (!empty($activity_id)) {
-                    $qid = isset($qdata['activity_id']) ? (string) $qdata['activity_id']
-                         : (isset($qdata['activityId'])  ? (string) $qdata['activityId'] : '');
+                    $qid = (string) self::array_find_first($qdata, array('activity_id','activityId','actId','id'));
                     if ($qid !== '' && $qid === (string) $activity_id) {
                         $primary_data = $qdata; // exact match — this is our activity's data
                         continue;
                     }
                 }
 
-                // Heuristic: queries with 'detail' / 'getactivity' in hash are likely the main activity
+                // Heuristic: queries with 'detail' / 'getactivity' / 'info' / 'basic' in hash are likely the main activity
                 $is_detail = (strpos($qhash, 'detail') !== false || strpos($qhash, 'getactivity') !== false
                            || strpos($qhash, 'activitydetail') !== false || strpos($qhash, 'product_detail') !== false
-                           || strpos($qhash, 'productdetail') !== false);
+                           || strpos($qhash, 'productdetail') !== false || strpos($qhash, 'activityinfo') !== false
+                           || strpos($qhash, 'getbasicinfo') !== false  || strpos($qhash, 'basicinfo') !== false
+                           || strpos($qhash, 'activitypage') !== false);
                 if ($is_detail && empty($primary_data)) {
                     $primary_data = $qdata;
                 } else {
@@ -4912,5 +4916,146 @@ if ($next_data_raw !== '') {
             if (!empty($out['price'])) break; // found in this node, stop
         }
         return $out;
+    }
+
+    /**
+     * Diagnostic endpoint: fetch a Klook URL and show exactly what was parsed.
+     * Does NOT create any post. Returns a JSON report for debugging.
+     * Usage: wp-admin AJAX fth_diagnose_parse with ?url=...
+     */
+    public static function diagnose_parse() {
+        if (!check_ajax_referer('fth_import_publish', 'nonce', false) || !current_user_can('manage_options')) {
+            wp_send_json_error('Unauthorized');
+        }
+        $url = isset($_POST['url']) ? esc_url_raw(trim($_POST['url'])) : '';
+        if (!$url) { wp_send_json_error('No URL provided'); }
+
+        $real_url = self::extract_real_klook_url($url);
+        $fetch    = self::fetch_klook_html($real_url);
+        $html     = $fetch['body'];
+        $report   = array(
+            'url'           => $real_url,
+            'fetch_source'  => $fetch['source'],
+            'html_length'   => strlen($html),
+            'has_next_data' => (strpos($html, '__NEXT_DATA__') !== false),
+            'queries'       => array(),
+            'primary_hash'  => '',
+            'supplement_hashes' => array(),
+            'extracted'     => array(),
+        );
+
+        if (empty($html)) {
+            $report['error'] = 'Fetch returned empty body';
+            wp_send_json_success($report);
+        }
+
+        // Extract activity_id from URL
+        $activity_id = '';
+        if (preg_match('#/activity/(\d+)#i', $real_url, $m)) $activity_id = $m[1];
+
+        // Find __NEXT_DATA__
+        $next_data_raw = '';
+        foreach (array('id="__NEXT_DATA__"', "id='__NEXT_DATA__'") as $marker) {
+            $pos = strpos($html, $marker);
+            if ($pos !== false) {
+                $gt  = strpos($html, '>', $pos);
+                $end = $gt !== false ? strpos($html, '</script>', $gt + 1) : false;
+                if ($gt !== false && $end !== false) {
+                    $next_data_raw = substr($html, $gt + 1, $end - $gt - 1);
+                }
+                break;
+            }
+        }
+
+        if (empty($next_data_raw)) {
+            $report['error'] = 'No __NEXT_DATA__ found in HTML. Page may be a Cloudflare challenge.';
+            $report['html_snippet'] = substr(strip_tags($html), 0, 500);
+            wp_send_json_success($report);
+        }
+
+        $next_json = json_decode(html_entity_decode(trim($next_data_raw), ENT_QUOTES, 'UTF-8'), true);
+        if (!is_array($next_json)) {
+            $report['error'] = 'json_decode failed on __NEXT_DATA__';
+            wp_send_json_success($report);
+        }
+
+        $page_props = isset($next_json['props']['pageProps']) ? $next_json['props']['pageProps'] : $next_json;
+        $report['has_dehydrated_state'] = isset($page_props['dehydratedState']['queries']);
+
+        if (isset($page_props['dehydratedState']['queries']) && is_array($page_props['dehydratedState']['queries'])) {
+            $contamination_patterns = array('list','recommend','similar','related','popular','search','nearby');
+            $primary_data = null;
+            foreach ($page_props['dehydratedState']['queries'] as $dq) {
+                if (empty($dq['state']['data'])) continue;
+                $qdata = $dq['state']['data'];
+                $qhash = isset($dq['queryHash']) ? $dq['queryHash'] : '(no hash)';
+                $qhash_low = strtolower($qhash);
+
+                $is_array_list = (is_array($qdata) && isset($qdata[0]) && is_array($qdata[0])
+                    && (isset($qdata[0]['activity_id']) || isset($qdata[0]['activityId'])
+                        || isset($qdata[0]['activityName']) || isset($qdata[0]['activity_name'])));
+                $is_contaminated = false;
+                foreach ($contamination_patterns as $cp) {
+                    if (strpos($qhash_low, $cp) !== false) { $is_contaminated = true; break; }
+                }
+
+                $is_detail = (strpos($qhash_low, 'detail') !== false || strpos($qhash_low, 'getactivity') !== false
+                           || strpos($qhash_low, 'activityinfo') !== false || strpos($qhash_low, 'basicinfo') !== false
+                           || strpos($qhash_low, 'activitypage') !== false);
+
+                $matched_id = '';
+                if (!empty($activity_id)) {
+                    $qid = (string) self::array_find_first($qdata, array('activity_id','activityId','actId'));
+                    if ($qid === (string) $activity_id) $matched_id = $qid;
+                }
+
+                // Sample a few key values from this query
+                $sample = array(
+                    'title'       => (string) self::array_find_first($qdata, array('seoTitle','activity_name','activityName','name','title')),
+                    'description' => substr((string) self::array_find_first($qdata, array('activity_intro','activityIntro','intro','description','seoDescription')), 0, 100),
+                    'price'       => (string) self::array_find_first($qdata, array('min_price','sell_price','sellPrice','fromPrice','price')),
+                    'image'       => (string) self::array_find_first($qdata, array('cover_img_url','img_url','coverImageUrl','imageUrl','image')),
+                    'faq_count'   => (string) count((array) self::array_find_first($qdata, array('faq_list','faq','faqs','faqList'))),
+                );
+
+                $role = 'supplement';
+                if ($is_array_list)    $role = 'SKIPPED (activity list)';
+                elseif ($is_contaminated) $role = 'SKIPPED (contamination)';
+                elseif ($matched_id)   $role = 'PRIMARY (id match)';
+                elseif ($is_detail && !$primary_data) $role = 'PRIMARY (hash heuristic)';
+
+                if ($role === 'PRIMARY (id match)' || $role === 'PRIMARY (hash heuristic)') {
+                    $primary_data = $qdata;
+                    $report['primary_hash'] = $qhash;
+                }
+
+                $report['queries'][] = array(
+                    'hash'       => $qhash,
+                    'role'       => $role,
+                    'data_type'  => gettype($qdata) . (is_array($qdata) ? '[' . count($qdata) . ']' : ''),
+                    'sample'     => $sample,
+                );
+            }
+        }
+
+        // Now run the real parser and show what it extracted
+        $parsed = self::parse_klook_html($html, $real_url, $activity_id);
+        $report['extracted'] = array(
+            'title'       => $parsed['title'],
+            'description_len' => strlen($parsed['description']),
+            'description_preview' => substr(strip_tags($parsed['description']), 0, 150),
+            'price'       => $parsed['price'],
+            'original_price' => $parsed['original_price'],
+            'currency'    => $parsed['currency'],
+            'image'       => $parsed['image'],
+            'images_count' => count($parsed['images']),
+            'highlights_len' => strlen($parsed['highlights']),
+            'itinerary_len' => strlen($parsed['itinerary']),
+            'faq_len'     => strlen($parsed['faq']),
+            'rating'      => $parsed['rating'],
+            'review_count'=> $parsed['review_count'],
+        );
+
+        wp_send_json_success($report);
     }
 }
