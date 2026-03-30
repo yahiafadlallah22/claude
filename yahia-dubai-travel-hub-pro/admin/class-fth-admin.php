@@ -2415,6 +2415,8 @@ if (document.readyState === 'loading') {
         // WP cities for "All my cities" mode
         $cities_terms = get_terms(array('taxonomy' => 'travel_city', 'hide_empty' => false, 'orderby' => 'name'));
         if (is_wp_error($cities_terms)) $cities_terms = array();
+        $countries_terms = get_terms(array('taxonomy' => 'travel_country', 'hide_empty' => false, 'orderby' => 'name'));
+        if (is_wp_error($countries_terms)) $countries_terms = array();
         $js_wp_cities = array();
         foreach ($cities_terms as $ct) {
             $ku = get_term_meta($ct->term_id, '_fth_klook_url', true);
@@ -2758,7 +2760,7 @@ if (document.readyState === 'loading') {
 
             var AJAX_URL  = <?php echo json_encode($ajax_url); ?>;
             var NONCE     = <?php echo json_encode($nonce); ?>;
-            var ALL_CITIES   = <?php echo json_encode(array_values($js_cities)); ?>;
+            var ALL_CITIES   = <?php echo json_encode(array_values($js_wp_cities)); ?>;
             var COUNTRY_CITIES = <?php echo json_encode($js_country_list); ?>;
             var WORLD_CITIES   = <?php echo json_encode($world_cities); ?>;
 
