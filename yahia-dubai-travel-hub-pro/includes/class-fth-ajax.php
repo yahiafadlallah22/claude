@@ -196,24 +196,7 @@ private static function build_affiliate_redirect($url) {
  * @return string       Raw HTML body (may be empty on total failure)
  */
 private static function fetch_klook_listing_html($url) {
-    // 1. Direct cURL — fast, often works for listing pages
-    $r = self::remote_get($url, array('timeout' => 20));
-    if (!is_wp_error($r)) {
-        $b = wp_remote_retrieve_body($r);
-        // Accept if we got a real page (contains activity/hotel links or Next data)
-        if (!empty($b) && (
-            strpos($b, 'klook.com/activity/') !== false ||
-            strpos($b, 'klook.com/en-US/activity/') !== false ||
-            strpos($b, 'klook.com/hotels/') !== false ||
-            strpos($b, 'klook.com/en-US/hotels/') !== false ||
-            strpos($b, '/hotels/detail/') !== false ||
-            strpos($b, '__NEXT_DATA__') !== false
-        )) {
-            return $b;
-        }
-    }
-
-    // Helper: ScraperAPI error detection
+    // Helper: ScraperAPI / DataDome error detection
     $is_sa_err = function($b) {
         if (empty($b)) return true;
         $low = strtolower(substr($b, 0, 600));
@@ -222,9 +205,44 @@ private static function fetch_klook_listing_html($url) {
             || strpos($low, 'premium=true') !== false;
     };
 
-    // 2. ScraperAPI render=true + premium (residential IP, bypasses Cloudflare on listing pages)
+    // Helper: check if body is a real listing page (has activity/hotel links)
+    $is_valid_listing = function($b) {
+        return !empty($b) && (
+            strpos($b, 'klook.com/activity/') !== false ||
+            strpos($b, 'klook.com/en-US/activity/') !== false ||
+            strpos($b, 'klook.com/hotels/') !== false ||
+            strpos($b, 'klook.com/en-US/hotels/') !== false ||
+            strpos($b, '/hotels/detail/') !== false ||
+            strpos($b, '__NEXT_DATA__') !== false
+        );
+    };
+
+    // 1. Direct cURL — fast, works when DataDome not triggered
+    $r = self::remote_get($url, array('timeout' => 20));
+    if (!is_wp_error($r)) {
+        $b = wp_remote_retrieve_body($r);
+        if ($is_valid_listing($b)) return $b;
+    }
+
+    // 2. ScraperAPI ultra_premium (DataDome bypass — listing pages also behind DataDome)
     $sa_key = self::get_scraperapi_key();
     if (!empty($sa_key)) {
+        $sa_url_up = 'https://api.scraperapi.com?' . http_build_query(array(
+            'api_key'       => $sa_key,
+            'url'           => $url,
+            'ultra_premium' => 'true',
+            'render'        => 'true',
+            'country_code'  => 'us',
+        ));
+        $sa_r_up = self::remote_get($sa_url_up, array('timeout' => 120));
+        if (!is_wp_error($sa_r_up)) {
+            $sa_b_up = wp_remote_retrieve_body($sa_r_up);
+            if (!$is_sa_err($sa_b_up) && $is_valid_listing($sa_b_up)) {
+                return $sa_b_up;
+            }
+        }
+
+        // 3. ScraperAPI premium fallback
         $sa_url = 'https://api.scraperapi.com?' . http_build_query(array(
             'api_key'      => $sa_key,
             'url'          => $url,
@@ -235,17 +253,12 @@ private static function fetch_klook_listing_html($url) {
         $sa_r = self::remote_get($sa_url, array('timeout' => 60));
         if (!is_wp_error($sa_r)) {
             $sa_b = wp_remote_retrieve_body($sa_r);
-            if (!$is_sa_err($sa_b) && (
-                strpos($sa_b, 'klook.com/activity/') !== false ||
-                strpos($sa_b, 'klook.com/hotels/') !== false ||
-                strpos($sa_b, 'klook.com/en-US/hotels/') !== false ||
-                strpos($sa_b, '__NEXT_DATA__') !== false
-            )) {
+            if (!$is_sa_err($sa_b) && $is_valid_listing($sa_b)) {
                 return $sa_b;
             }
         }
 
-        // 3. ScraperAPI without premium as fallback
+        // 4. ScraperAPI without premium as fallback
         $sa_url2 = 'https://api.scraperapi.com?' . http_build_query(array(
             'api_key'      => $sa_key,
             'url'          => $url,
@@ -1486,7 +1499,11 @@ public static function discover_import_urls() {
     // CDX fallback (Wayback Machine index) if direct scan yielded nothing
     if (empty($all_links)) {
         $city_slug_cdx = '';
+        // Try to extract city slug from various URL formats:
+        // /destination/c123-dubai/, /hotels/dubai/, /en-US/hotels/dubai/, /activity/dubai-...
         if (preg_match('#/destination/c\d+-([a-z0-9-]+)#i', $real_url, $csm)) {
+            $city_slug_cdx = $csm[1];
+        } elseif (preg_match('#/hotels?/([a-z][a-z0-9-]+)/?(?:\?|$)#i', $real_url, $csm)) {
             $city_slug_cdx = $csm[1];
         } elseif ($city) {
             $ct = get_term($city, 'travel_city');
@@ -2625,10 +2642,11 @@ public static function import_bulk_city() {
             if (!current_user_can('edit_posts')) {
                 self::send_json_error_clean('Unauthorized');
             }
-            $url = isset($_POST['url']) ? esc_url_raw($_POST['url']) : '';
-            $city = isset($_POST['city']) ? intval($_POST['city']) : 0;
-            $country = isset($_POST['country']) ? intval($_POST['country']) : 0;
-            $limit = isset($_POST['limit']) ? max(1, min(180, intval($_POST['limit']))) : 24;
+            $url          = isset($_POST['url'])          ? esc_url_raw($_POST['url'])                    : '';
+            $city         = isset($_POST['city'])         ? intval($_POST['city'])                        : 0;
+            $country      = isset($_POST['country'])      ? intval($_POST['country'])                     : 0;
+            $limit        = isset($_POST['limit'])        ? max(1, min(180, intval($_POST['limit'])))     : 24;
+            $force_update = !empty($_POST['force_update']);
             if (!$url) {
                 self::send_json_error_clean('Please enter a hotels URL');
             }
@@ -2691,25 +2709,29 @@ public static function import_bulk_city() {
                 self::send_json_error_clean('No hotel links found. ' . implode(' | ', array_slice($notes, 0, 5)));
             }
 
-            // Filter already-imported hotels so each run adds NEW content
-            $already_imported_hotel_ids = self::get_imported_klook_ids('hotel');
+            // Filter already-imported hotels (skipped when force_update is on)
             $skipped_hotels = 0;
-            $new_links      = array();
-            foreach ($links as $lnk) {
-                if (preg_match('#/hotels?/(?:detail/)?(\d+)-#', $lnk, $lm)) {
-                    $hid = !empty($lm[1]) ? $lm[1] : $lm[2];
-                    if (in_array($hid, $already_imported_hotel_ids, true)) {
-                        $skipped_hotels++;
-                        continue;
+            if (!$force_update) {
+                $already_imported_hotel_ids = self::get_imported_klook_ids('hotel');
+                $new_links = array();
+                foreach ($links as $lnk) {
+                    if (preg_match('#/hotels?/(?:detail/)?(\d+)[-/]#', $lnk, $lm)) {
+                        $hid = $lm[1];
+                        if (in_array($hid, $already_imported_hotel_ids, true)) {
+                            $skipped_hotels++;
+                            continue;
+                        }
                     }
+                    $new_links[] = $lnk;
                 }
-                $new_links[] = $lnk;
-            }
-            $links = array_slice($new_links, 0, $limit);
-            if (empty($links)) {
-                self::send_json_error_clean(
-                    'All ' . $skipped_hotels . ' found hotels are already imported. Run the import again with the next page or a different URL.'
-                );
+                $links = array_slice($new_links, 0, $limit);
+                if (empty($links)) {
+                    self::send_json_error_clean(
+                        'All ' . $skipped_hotels . ' found hotels are already imported. Enable "Force Update" to re-import them.'
+                    );
+                }
+            } else {
+                $links = array_slice($links, 0, $limit);
             }
 
             $imported = 0; $checked = 0; $errors = array(); $stopped_early = false;
