@@ -2,8 +2,8 @@
 /**
  * Plugin Name: Yahia Dubai Travel Hub Pro
  * Plugin URI: https://flavor.ae/
- * Description: Yahia Dubai travel hub – attractions, tours and hotels imported from Klook with affiliate links, full AIOSEO automation, Klook-style design and WP Residence-safe templates. v1.31
- * Version: 1.31.0
+ * Description: Yahia Dubai travel hub – attractions, tours and hotels imported from Klook with affiliate links, full AIOSEO automation, Klook-style design and WP Residence-safe templates. v1.32
+ * Version: 1.32.0
  * Author: Flavor
  * Author URI: https://flavor.ae/
  * Text Domain: flavor-travel-hub
@@ -96,6 +96,9 @@ final class Flavor_Travel_Hub {
         add_action('init', array($this, 'handle_image_proxy'), 1);
         add_action('init', array($this, 'migrate_french_options'), 5);
         add_action('plugins_loaded', array($this, 'load_textdomain'));
+        // Cron: register custom schedules and price-update hook
+        add_filter('cron_schedules',       array($this, 'add_cron_schedules'));
+        add_action('fth_cron_price_update', array($this, 'run_cron_price_update'));
     }
     
     /**
@@ -212,6 +215,69 @@ final class Flavor_Travel_Hub {
      */
     public function deactivate() {
         flush_rewrite_rules();
+        // Remove scheduled cron on deactivation
+        $ts = wp_next_scheduled('fth_cron_price_update');
+        if ($ts) wp_unschedule_event($ts, 'fth_cron_price_update');
+    }
+
+    /** Register custom WP-Cron intervals */
+    public function add_cron_schedules($schedules) {
+        $schedules['fth_twiceweekly'] = array(
+            'interval' => 302400, // 3.5 days in seconds
+            'display'  => 'Twice a week (FTH)',
+        );
+        $schedules['fth_monthly'] = array(
+            'interval' => 2592000, // 30 days
+            'display'  => 'Monthly (FTH)',
+        );
+        return $schedules;
+    }
+
+    /**
+     * Reschedule or remove the price-update cron based on the saved setting.
+     * Called when the setting changes (from the price-update admin page).
+     */
+    public static function reschedule_price_cron($frequency) {
+        $hook = 'fth_cron_price_update';
+        $ts   = wp_next_scheduled($hook);
+        if ($ts) wp_unschedule_event($ts, $hook);
+        if ($frequency && $frequency !== 'disabled') {
+            wp_schedule_event(time() + 300, $frequency, $hook);
+        }
+    }
+
+    /**
+     * Cron callback: update prices for the next batch of posts.
+     * Uses a rolling offset stored in options so each run processes a different slice.
+     */
+    public function run_cron_price_update() {
+        update_option('fth_price_cron_last_run', time());
+        $batch   = max(10, min(50, (int) get_option('fth_price_cron_batch', 20)));
+        $offset  = (int) get_option('fth_price_cron_offset', 0);
+        $types   = get_option('fth_price_cron_types', 'both'); // 'activity','hotel','both'
+        $post_types = ($types === 'hotel') ? array('travel_hotel') : (($types === 'activity') ? array('travel_activity') : array('travel_activity','travel_hotel'));
+        $posts = get_posts(array(
+            'post_type'      => $post_types,
+            'post_status'    => 'publish',
+            'posts_per_page' => $batch,
+            'offset'         => $offset,
+            'orderby'        => 'ID',
+            'order'          => 'ASC',
+            'fields'         => 'ids',
+        ));
+        if (empty($posts)) {
+            // Reached end — wrap around
+            update_option('fth_price_cron_offset', 0);
+            update_option('fth_price_cron_last_result', 'Fin de liste. Reprise au début au prochain cycle.');
+            return;
+        }
+        $updated = 0; $failed = 0;
+        foreach ($posts as $pid) {
+            $r = FTH_Ajax::update_post_price($pid);
+            if (!empty($r['updated'])) $updated++; else $failed++;
+        }
+        update_option('fth_price_cron_offset', $offset + count($posts));
+        update_option('fth_price_cron_last_result', sprintf('%d mis à jour, %d échoués sur %d (offset %d)', $updated, $failed, count($posts), $offset));
     }
     
     /**

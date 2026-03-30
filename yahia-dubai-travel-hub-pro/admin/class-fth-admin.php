@@ -169,6 +169,16 @@ class FTH_Admin {
             'fth-marathon',
             array(__CLASS__, 'marathon_page')
         );
+
+        // Price Update — mass price refresh + cron
+        add_submenu_page(
+            'fth-travel-hub',
+            'Mise à jour des prix',
+            '💰 Mise à jour Prix',
+            'manage_options',
+            'fth-price-update',
+            array(__CLASS__, 'price_update_page')
+        );
     }
     
     /**
@@ -2409,6 +2419,210 @@ if (document.readyState === 'loading') {
     // ─────────────────────────────────────────────────────────────
     // MARATHON IMPORT — Dedicated bulk import page
     // ─────────────────────────────────────────────────────────────
+    /* ═══════════════════════════════════════════════════════════
+     *  PRICE UPDATE PAGE
+     * ═══════════════════════════════════════════════════════════ */
+    public static function price_update_page() {
+        if (!current_user_can('manage_options')) { wp_die('Unauthorized'); }
+
+        // Save cron settings
+        if (isset($_POST['fth_price_cron_save']) && check_admin_referer('fth_price_cron_nonce')) {
+            $freq   = sanitize_text_field($_POST['fth_price_cron_freq']   ?? 'disabled');
+            $batch  = max(5, min(50, (int) ($_POST['fth_price_cron_batch'] ?? 20)));
+            $types  = sanitize_text_field($_POST['fth_price_cron_types']  ?? 'both');
+            $allowed_freqs = array('disabled','daily','fth_twiceweekly','weekly','fth_monthly');
+            if (!in_array($freq, $allowed_freqs, true)) $freq = 'disabled';
+            update_option('fth_price_cron_freq',  $freq);
+            update_option('fth_price_cron_batch', $batch);
+            update_option('fth_price_cron_types', $types);
+            update_option('fth_price_cron_offset', 0); // reset offset on settings change
+            Flavor_Travel_Hub::reschedule_price_cron($freq);
+            echo '<div class="notice notice-success is-dismissible"><p>✅ Paramètres du cron sauvegardés.</p></div>';
+        }
+
+        $freq       = get_option('fth_price_cron_freq', 'disabled');
+        $batch      = get_option('fth_price_cron_batch', 20);
+        $types      = get_option('fth_price_cron_types', 'both');
+        $last_run   = get_option('fth_price_cron_last_run', 0);
+        $last_res   = get_option('fth_price_cron_last_result', '—');
+        $next_ts    = wp_next_scheduled('fth_cron_price_update');
+        $act_count  = wp_count_posts('travel_activity')->publish ?? 0;
+        $htl_count  = wp_count_posts('travel_hotel')->publish    ?? 0;
+        $nonce      = wp_create_nonce('fth_import_publish');
+        $freq_labels = array('disabled'=>'Désactivé','daily'=>'Quotidien','fth_twiceweekly'=>'2× par semaine','weekly'=>'Hebdomadaire','fth_monthly'=>'Mensuel');
+        ?>
+<div class="wrap" style="max-width:900px">
+<h1 style="display:flex;align-items:center;gap:10px;margin-bottom:20px">💰 Mise à jour des prix</h1>
+
+<!-- Stats -->
+<div style="display:grid;grid-template-columns:repeat(3,1fr);gap:16px;margin-bottom:24px">
+<?php foreach (array('Activités publiées'=>$act_count,'Hôtels publiés'=>$htl_count,'Total'=>$act_count+$htl_count) as $lbl=>$val): ?>
+<div style="background:#fff;border:1px solid #ddd;border-radius:10px;padding:18px;text-align:center">
+    <div style="font-size:28px;font-weight:900;color:#2575fc"><?php echo number_format($val); ?></div>
+    <div style="color:#666;font-size:13px;margin-top:4px"><?php echo esc_html($lbl); ?></div>
+</div>
+<?php endforeach; ?>
+</div>
+
+<!-- Cron settings -->
+<div style="background:#fff;border:1px solid #ddd;border-radius:12px;padding:22px;margin-bottom:24px">
+<h2 style="margin:0 0 16px;font-size:17px">⏰ Planification automatique (Cron WP)</h2>
+<form method="post">
+<?php wp_nonce_field('fth_price_cron_nonce'); ?>
+<table class="form-table" style="margin:0">
+<tr><th style="width:160px">Fréquence</th><td>
+<select name="fth_price_cron_freq">
+<?php foreach ($freq_labels as $val=>$lbl): ?>
+<option value="<?php echo esc_attr($val); ?>" <?php selected($freq,$val); ?>><?php echo esc_html($lbl); ?></option>
+<?php endforeach; ?>
+</select></td></tr>
+<tr><th>Type</th><td>
+<select name="fth_price_cron_types">
+<option value="both"     <?php selected($types,'both'); ?>>Activités + Hôtels</option>
+<option value="activity" <?php selected($types,'activity'); ?>>Activités seulement</option>
+<option value="hotel"    <?php selected($types,'hotel'); ?>>Hôtels seulement</option>
+</select></td></tr>
+<tr><th>Articles / cycle</th><td>
+<input type="number" name="fth_price_cron_batch" value="<?php echo esc_attr($batch); ?>" min="5" max="50" style="width:80px"> <span style="color:#888;font-size:12px">(5–50 articles mis à jour par exécution)</span>
+</td></tr>
+</table>
+<p style="margin:14px 0 0">
+<button type="submit" name="fth_price_cron_save" value="1" class="button button-primary">Enregistrer</button>
+&nbsp;
+<?php if ($freq !== 'disabled' && $next_ts): ?>
+<span style="background:#e8f5e9;color:#2e7d32;padding:5px 12px;border-radius:6px;font-size:13px">
+    ✅ Actif · Prochain: <?php echo esc_html(human_time_diff(time(), $next_ts) . ' dans ' . date('d/m/Y H:i', $next_ts)); ?></span>
+<?php elseif ($freq !== 'disabled'): ?>
+<span style="background:#fff3e0;color:#e65100;padding:5px 12px;border-radius:6px;font-size:13px">⚠️ Cron non encore planifié (sera actif après sauvegarde)</span>
+<?php else: ?>
+<span style="color:#888;font-size:13px">Cron désactivé</span>
+<?php endif; ?>
+</p>
+<?php if ($last_run): ?>
+<p style="margin:8px 0 0;color:#666;font-size:12px">
+Dernière exécution: <?php echo esc_html(date('d/m/Y H:i', $last_run)); ?> — <?php echo esc_html($last_res); ?>
+</p>
+<?php endif; ?>
+</form>
+</div>
+
+<!-- Manual update -->
+<div style="background:#fff;border:1px solid #ddd;border-radius:12px;padding:22px">
+<h2 style="margin:0 0 4px;font-size:17px">🚀 Mise à jour manuelle des prix</h2>
+<p style="margin:0 0 16px;color:#666;font-size:13px">Récupère uniquement les prix depuis Klook sans toucher aux photos, descriptions ou autres données.</p>
+
+<div style="display:flex;gap:14px;flex-wrap:wrap;align-items:flex-end;margin-bottom:16px">
+<label style="font-size:13px;font-weight:600">Type :
+<select id="fth_pu_type" style="margin-left:6px">
+<option value="both">Activités + Hôtels</option>
+<option value="activity">Activités seulement</option>
+<option value="hotel">Hôtels seulement</option>
+</select></label>
+<label style="font-size:13px;font-weight:600">Lots parallèles :
+<select id="fth_pu_parallel" style="margin-left:6px">
+<option value="3">3</option><option value="5" selected>5</option><option value="10">10</option>
+</select></label>
+<button id="fth_pu_start" class="button button-primary" style="height:34px">▶ Lancer</button>
+<button id="fth_pu_stop"  class="button" style="height:34px;display:none">⏹ Arrêter</button>
+</div>
+
+<div id="fth_pu_bar_wrap" style="display:none;margin-bottom:12px">
+<div style="background:#e9ecef;border-radius:6px;height:10px;overflow:hidden">
+    <div id="fth_pu_bar" style="background:linear-gradient(90deg,#2575fc,#6a11cb);height:100%;width:0%;transition:width .3s"></div>
+</div>
+<div id="fth_pu_stats" style="margin-top:6px;font-size:13px;color:#444"></div>
+</div>
+
+<div id="fth_pu_log" style="background:#0f172a;color:#e2e8f0;border-radius:8px;padding:14px;font-family:monospace;font-size:12px;height:300px;overflow-y:auto;display:none"></div>
+</div>
+</div>
+
+<script>
+(function(){
+var nonce   = <?php echo json_encode($nonce); ?>;
+var ajaxurl = <?php echo json_encode(admin_url('admin-ajax.php')); ?>;
+var stopped = false, running = false;
+var startBtn = document.getElementById('fth_pu_start');
+var stopBtn  = document.getElementById('fth_pu_stop');
+var barEl    = document.getElementById('fth_pu_bar');
+var statsEl  = document.getElementById('fth_pu_stats');
+var logEl    = document.getElementById('fth_pu_log');
+var barWrap  = document.getElementById('fth_pu_bar_wrap');
+
+function log(msg, color) {
+    var d = document.createElement('div');
+    d.style.cssText = 'padding:2px 0;border-bottom:1px solid rgba(255,255,255,0.05);color:' + (color||'#e2e8f0');
+    d.textContent = msg;
+    logEl.insertBefore(d, logEl.firstChild);
+}
+
+function post(data) {
+    data.nonce = nonce;
+    var fd = new FormData();
+    Object.keys(data).forEach(function(k){ fd.append(k, data[k]); });
+    return fetch(ajaxurl, {method:'POST', body:fd, credentials:'same-origin'})
+           .then(function(r){ return r.json(); }).catch(function(){ return {success:false}; });
+}
+
+startBtn.addEventListener('click', async function() {
+    if (running) return;
+    running = true; stopped = false;
+    startBtn.disabled = true; stopBtn.style.display = '';
+    logEl.style.display = ''; barWrap.style.display = '';
+    logEl.innerHTML = '';
+
+    var ptype    = document.getElementById('fth_pu_type').value;
+    var parallel = parseInt(document.getElementById('fth_pu_parallel').value, 10);
+
+    // 1. Get queue
+    log('⏳ Récupération de la liste…', '#60a5fa');
+    var qres = await post({action:'fth_price_update_queue', post_type: ptype});
+    if (!qres.success || !qres.data || !qres.data.ids || !qres.data.ids.length) {
+        log('❌ Impossible de récupérer la liste: ' + (qres.data && qres.data.message ? qres.data.message : 'erreur'), '#f87171');
+        running = false; startBtn.disabled = false; stopBtn.style.display = 'none'; return;
+    }
+    var ids = qres.data.ids;
+    log('✅ ' + ids.length + ' articles à traiter', '#34d399');
+    var total = ids.length, done = 0, updated = 0, unchanged = 0, failed = 0;
+
+    // 2. Process in parallel batches
+    for (var i = 0; i < ids.length && !stopped; i += parallel) {
+        var batch = ids.slice(i, i + parallel);
+        var results = await Promise.all(batch.map(function(pid) {
+            return post({action:'fth_price_update_single', post_id: pid})
+                   .then(function(r){ return {r:r, pid:pid}; });
+        }));
+        results.forEach(function(item) {
+            done++;
+            if (item.r && item.r.success && item.r.data) {
+                var d = item.r.data;
+                if (d.changed) {
+                    updated++;
+                    log('💰 ' + d.title + ' : ' + d.old_price + ' → ' + d.new_price + ' ' + d.currency, '#34d399');
+                } else {
+                    unchanged++;
+                    log('✓ ' + d.title + ' : inchangé (' + (d.new_price||'N/A') + ')', '#94a3b8');
+                }
+            } else {
+                failed++;
+                var msg = item.r && item.r.data && item.r.data.message ? item.r.data.message : 'échec';
+                log('❌ #' + item.pid + ' — ' + msg, '#f87171');
+            }
+            var pct = Math.round(done / total * 100);
+            barEl.style.width = pct + '%';
+            statsEl.textContent = done + '/' + total + ' traités · ' + updated + ' mis à jour · ' + unchanged + ' inchangés · ' + failed + ' erreurs';
+        });
+    }
+    log(stopped ? '⏹ Arrêté par l\'utilisateur.' : '✅ Terminé ! ' + updated + ' prix mis à jour, ' + failed + ' erreurs.', stopped ? '#fbbf24' : '#34d399');
+    running = false; startBtn.disabled = false; stopBtn.style.display = 'none';
+});
+
+stopBtn.addEventListener('click', function(){ stopped = true; });
+})();
+</script>
+<?php
+    }
+
     public static function marathon_page() {
         if (!current_user_can('manage_options')) { wp_die('Unauthorized'); }
 

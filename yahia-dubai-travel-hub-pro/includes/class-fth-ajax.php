@@ -53,6 +53,9 @@ class FTH_Ajax {
         add_action('wp_ajax_fth_discover_import_urls', array(__CLASS__, 'discover_import_urls'));
         // Live import: import a single URL and return rich preview data
         add_action('wp_ajax_fth_import_single_live', array(__CLASS__, 'import_single_live'));
+        // Price update: get list of post IDs / update single post price
+        add_action('wp_ajax_fth_price_update_queue',  array(__CLASS__, 'price_update_queue'));
+        add_action('wp_ajax_fth_price_update_single', array(__CLASS__, 'price_update_single'));
     }
     
 
@@ -4624,5 +4627,248 @@ if ($next_data_raw !== '') {
         } catch (Throwable $e) {
             self::send_json_error_clean('Country import failed: ' . $e->getMessage());
         }
+    }
+
+    /* ═══════════════════════════════════════════════════════════
+     *  PRICE UPDATE  — lightweight re-scrape of price fields only
+     * ═══════════════════════════════════════════════════════════ */
+
+    /**
+     * Return IDs of all published activities/hotels.
+     * POST params: post_type  'activity'|'hotel'|'both'
+     */
+    public static function price_update_queue() {
+        self::begin_import_request();
+        if (!check_ajax_referer('fth_import_publish', 'nonce', false)) {
+            self::send_json_error_clean('Security check failed');
+        }
+        if (!current_user_can('manage_options')) {
+            self::send_json_error_clean('Unauthorized');
+        }
+        $ptype  = isset($_POST['post_type']) ? sanitize_text_field($_POST['post_type']) : 'both';
+        $types  = ($ptype === 'hotel') ? array('travel_hotel') : (($ptype === 'activity') ? array('travel_activity') : array('travel_activity','travel_hotel'));
+        $ids = get_posts(array(
+            'post_type'      => $types,
+            'post_status'    => 'publish',
+            'posts_per_page' => -1,
+            'orderby'        => 'ID',
+            'order'          => 'ASC',
+            'fields'         => 'ids',
+        ));
+        if (empty($ids)) {
+            self::send_json_error_clean('Aucun article publié trouvé.');
+        }
+        // Shuffle so cron runs don't always start at the same posts
+        shuffle($ids);
+        self::send_json_success_clean(array('ids' => array_values($ids), 'total' => count($ids)));
+    }
+
+    /**
+     * Re-fetch a single post's Klook page and update price fields only.
+     * POST params: post_id
+     * Public static so the cron callback can call it directly.
+     */
+    public static function price_update_single() {
+        self::begin_import_request();
+        if (!check_ajax_referer('fth_import_publish', 'nonce', false)) {
+            self::send_json_error_clean('Security check failed');
+        }
+        if (!current_user_can('manage_options')) {
+            self::send_json_error_clean('Unauthorized');
+        }
+        $post_id = isset($_POST['post_id']) ? intval($_POST['post_id']) : 0;
+        if (!$post_id) { self::send_json_error_clean('post_id manquant'); }
+        $result = self::update_post_price($post_id);
+        if (empty($result['success'])) {
+            self::send_json_error_clean($result['message'] ?? 'Échec', $result);
+        }
+        self::send_json_success_clean($result);
+    }
+
+    /**
+     * Core price-update logic.  Shared by the AJAX handler and the cron callback.
+     * Returns array with keys: success, post_id, title, old_price, new_price, currency, changed, message
+     */
+    public static function update_post_price($post_id) {
+        $post = get_post($post_id);
+        if (!$post) return array('success'=>false,'message'=>'Post introuvable');
+
+        $post_type = $post->post_type;
+        $is_hotel  = ($post_type === 'travel_hotel');
+
+        // Build the Klook URL to re-fetch
+        $url = '';
+        $aff = get_post_meta($post_id, '_fth_affiliate_link', true);
+        if ($aff) {
+            // Extract the destination URL from the affiliate redirect
+            if (preg_match('#[?&](?:url|destination|goto|deep_link)=([^&]+)#i', $aff, $m)) {
+                $url = urldecode($m[1]);
+            }
+        }
+        if (!$url) {
+            // Reconstruct from Klook ID stored as meta
+            $kid = get_post_meta($post_id, $is_hotel ? '_fth_klook_hotel_id' : '_fth_klook_activity_id', true);
+            if ($kid) {
+                $slug = sanitize_title($post->post_title);
+                $url  = $is_hotel
+                    ? 'https://www.klook.com/en-US/hotels/detail/' . intval($kid) . '-' . $slug . '/'
+                    : 'https://www.klook.com/en-US/activity/' . intval($kid) . '-' . $slug . '/';
+            }
+        }
+        if (!$url) {
+            return array('success'=>false,'post_id'=>$post_id,'message'=>'URL Klook introuvable pour ce post');
+        }
+
+        // Fetch with lightweight strategy (no render=true — saves ScraperAPI credits)
+        $html = self::fetch_klook_price_html($url);
+        if (empty($html)) {
+            return array('success'=>false,'post_id'=>$post_id,'message'=>'Impossible de récupérer la page: ' . $url);
+        }
+
+        // Extract prices from __NEXT_DATA__ only (fast — no full parse)
+        $prices = self::extract_prices_from_html($html);
+        if (empty($prices['price'])) {
+            return array('success'=>false,'post_id'=>$post_id,'message'=>'Prix non trouvé dans la page');
+        }
+
+        $old_price  = get_post_meta($post_id, '_fth_price', true);
+        $new_price  = $prices['price'];
+        $new_orig   = $prices['original_price'] ?? '';
+        $currency   = $prices['currency'] ?? 'USD';
+        $changed    = ((string)$old_price !== (string)$new_price);
+
+        if ($changed || !empty($new_orig)) {
+            update_post_meta($post_id, '_fth_price',          $new_price);
+            update_post_meta($post_id, '_fth_currency',       $currency);
+            if ($new_orig && (float)$new_orig > (float)$new_price) {
+                update_post_meta($post_id, '_fth_original_price', $new_orig);
+            } elseif ((float)$new_orig <= (float)$new_price) {
+                delete_post_meta($post_id, '_fth_original_price');
+            }
+        }
+        update_post_meta($post_id, '_fth_price_last_updated', time());
+
+        return array(
+            'success'   => true,
+            'post_id'   => $post_id,
+            'title'     => $post->post_title,
+            'old_price' => $old_price ?: '—',
+            'new_price' => $new_price,
+            'currency'  => $currency,
+            'changed'   => $changed,
+            'message'   => $changed ? 'Prix mis à jour' : 'Inchangé',
+        );
+    }
+
+    /**
+     * Lightweight Klook page fetch: tries direct cURL first, then ScraperAPI
+     * WITHOUT render=true (much cheaper, ~5 credits vs 25+).
+     * Returns raw HTML string or empty string on total failure.
+     */
+    private static function fetch_klook_price_html($url) {
+        $sa_key = self::get_scraperapi_key();
+
+        // 1. Direct cURL (free — works if server IP not Cloudflare-flagged)
+        $r = self::remote_get($url, array('timeout' => 20));
+        if (!is_wp_error($r)) {
+            $b = wp_remote_retrieve_body($r);
+            if (!empty($b) && strpos($b, '__NEXT_DATA__') !== false) return $b;
+        }
+
+        if (empty($sa_key)) return '';
+
+        // 2. ScraperAPI without render=true (no headless Chrome — much cheaper)
+        $sa_url = 'https://api.scraperapi.com?' . http_build_query(array(
+            'api_key'      => $sa_key,
+            'url'          => $url,
+            'country_code' => 'us',
+            'keep_headers' => 'true',
+        ));
+        $r2 = self::remote_get($sa_url, array('timeout' => 60));
+        if (!is_wp_error($r2)) {
+            $b2 = wp_remote_retrieve_body($r2);
+            if (!empty($b2) && strpos($b2, '__NEXT_DATA__') !== false) return $b2;
+        }
+
+        // 3. ScraperAPI with render=true (fallback — costs more credits)
+        $sa_url3 = 'https://api.scraperapi.com?' . http_build_query(array(
+            'api_key'      => $sa_key,
+            'url'          => $url,
+            'render'       => 'true',
+            'country_code' => 'us',
+        ));
+        $r3 = self::remote_get($sa_url3, array('timeout' => 90));
+        if (!is_wp_error($r3)) {
+            $b3 = wp_remote_retrieve_body($r3);
+            if (!empty($b3) && strpos($b3, '__NEXT_DATA__') !== false) return $b3;
+        }
+        return '';
+    }
+
+    /**
+     * Extract price, original_price, currency from raw HTML.
+     * Only reads __NEXT_DATA__ — faster than full parse.
+     */
+    private static function extract_prices_from_html($html) {
+        $out = array('price'=>'','original_price'=>'','currency'=>'USD');
+
+        // Pull __NEXT_DATA__ JSON
+        $nd_pos = strpos($html, 'id="__NEXT_DATA__"');
+        if ($nd_pos === false) {
+            // Fallback: og:price or regex
+            if (preg_match('/"(?:sellPrice|salePrice|fromPrice|min_price|sell_price)":\s*"?(\d+(?:\.\d+)?)"?/i', $html, $m)) {
+                $p = self::normalize_price_amount($m[1], 1);
+                if ($p) $out['price'] = $p;
+            }
+            return $out;
+        }
+        $gt  = strpos($html, '>', $nd_pos);
+        $end = $gt !== false ? strpos($html, '</script>', $gt + 1) : false;
+        if (!$gt || !$end) return $out;
+        $raw  = substr($html, $gt + 1, $end - $gt - 1);
+        $json = json_decode(html_entity_decode(trim($raw), ENT_QUOTES, 'UTF-8'), true);
+        if (!is_array($json)) return $out;
+
+        $page_props = isset($json['props']['pageProps']) ? $json['props']['pageProps'] : $json;
+
+        // Walk dehydratedState queries for price keys
+        $price_keys    = array('min_price','from_price','sell_price','sellPrice','fromPrice','minSellingPrice','salePrice','discountPrice','lowestPrice','price');
+        $orig_keys     = array('original_price','market_price','originalPrice','marketPrice','strikePrice','retailPrice');
+        $currency_keys = array('currency','currencyCode','priceCurrency');
+
+        $search_nodes = array($page_props);
+        if (isset($page_props['dehydratedState']['queries'])) {
+            foreach ($page_props['dehydratedState']['queries'] as $dq) {
+                if (!empty($dq['state']['data'])) $search_nodes[] = $dq['state']['data'];
+            }
+        }
+
+        foreach ($search_nodes as $node) {
+            if (!is_array($node)) continue;
+            if (empty($out['price'])) {
+                $pv = self::array_find_first($node, $price_keys);
+                if ($pv !== '' && $pv !== null) {
+                    if (is_array($pv)) $pv = self::array_find_first($pv, array('amount','value','formatValue'));
+                    $p = self::normalize_price_amount($pv, 1);
+                    if ($p) $out['price'] = $p;
+                }
+            }
+            if (empty($out['original_price'])) {
+                $ov = self::array_find_first($node, $orig_keys);
+                if ($ov !== '' && $ov !== null) {
+                    if (is_array($ov)) $ov = self::array_find_first($ov, array('amount','value','formatValue'));
+                    $o = self::normalize_price_amount($ov, 1);
+                    if ($o) $out['original_price'] = $o;
+                }
+            }
+            if (empty($out['currency']) || $out['currency'] === 'USD') {
+                $cv = self::array_find_first($node, $currency_keys);
+                if (is_string($cv) && strlen($cv) === 3) {
+                    $out['currency'] = strtoupper(preg_replace('/[^A-Z]/', '', $cv));
+                }
+            }
+            if (!empty($out['price'])) break; // found in this node, stop
+        }
+        return $out;
     }
 }
