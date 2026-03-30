@@ -198,8 +198,15 @@ private static function fetch_klook_listing_html($url) {
     $r = self::remote_get($url, array('timeout' => 20));
     if (!is_wp_error($r)) {
         $b = wp_remote_retrieve_body($r);
-        // Accept if we got a real page (contains activity links or Next data)
-        if (!empty($b) && (strpos($b, 'klook.com/activity/') !== false || strpos($b, 'klook.com/en-US/activity/') !== false || strpos($b, '__NEXT_DATA__') !== false)) {
+        // Accept if we got a real page (contains activity/hotel links or Next data)
+        if (!empty($b) && (
+            strpos($b, 'klook.com/activity/') !== false ||
+            strpos($b, 'klook.com/en-US/activity/') !== false ||
+            strpos($b, 'klook.com/hotels/') !== false ||
+            strpos($b, 'klook.com/en-US/hotels/') !== false ||
+            strpos($b, '/hotels/detail/') !== false ||
+            strpos($b, '__NEXT_DATA__') !== false
+        )) {
             return $b;
         }
     }
@@ -226,7 +233,12 @@ private static function fetch_klook_listing_html($url) {
         $sa_r = self::remote_get($sa_url, array('timeout' => 60));
         if (!is_wp_error($sa_r)) {
             $sa_b = wp_remote_retrieve_body($sa_r);
-            if (!$is_sa_err($sa_b) && (strpos($sa_b, 'klook.com/activity/') !== false || strpos($sa_b, '__NEXT_DATA__') !== false)) {
+            if (!$is_sa_err($sa_b) && (
+                strpos($sa_b, 'klook.com/activity/') !== false ||
+                strpos($sa_b, 'klook.com/hotels/') !== false ||
+                strpos($sa_b, 'klook.com/en-US/hotels/') !== false ||
+                strpos($sa_b, '__NEXT_DATA__') !== false
+            )) {
                 return $sa_b;
             }
         }
@@ -789,9 +801,9 @@ private static function extract_hotel_listing_items_from_html($body) {
                 }
                 $url = '';
                 foreach ($node as $value) {
-                    if (is_string($value) && strpos($value, '/hotels/detail/') !== false) {
+                    if (is_string($value) && preg_match('#/hotels?/(?:detail/)?\d+#i', $value)) {
                         $url = self::normalize_klook_link($value);
-                        break;
+                        if ($url) break;
                     }
                 }
                 if ($url) {
@@ -819,7 +831,7 @@ private static function extract_hotel_listing_items_from_html($body) {
             }
         }
     }
-    if (empty($items) && preg_match_all('#(https://www\.klook\.com/[^"\'\s<>]*/hotels?/detail/[^"\'\s<>]+)#i', $body, $matches, PREG_OFFSET_CAPTURE)) {
+    if (empty($items) && preg_match_all('#(https://www\.klook\.com/[^"\'\s<>]*/hotels?/(?:detail/)?\d+[^"\'\s<>]*)#i', $body, $matches, PREG_OFFSET_CAPTURE)) {
         foreach ($matches[1] as $m) {
             $url = self::normalize_klook_link($m[0]);
             $offset = (int) $m[1];
@@ -906,6 +918,26 @@ private static function extract_hotel_links_from_html($body) {
                 // Must contain /hotels/ or /hotel/ with a numeric ID
                 if (preg_match('#/hotels?/(?:detail/)?\d+#i', $found)) {
                     $links[] = $found;
+                }
+            }
+        }
+    }
+    // Deep scan __NEXT_DATA__ JSON for hotel URLs (same as activity extractor)
+    if (preg_match('/<script[^>]*id=["\']__NEXT_DATA__["\'][^>]*>(.*?)<\/script>/si', $body, $match)) {
+        $json = json_decode(html_entity_decode(trim($match[1]), ENT_QUOTES, 'UTF-8'), true);
+        if (is_array($json)) {
+            $stack = array($json);
+            while ($stack) {
+                $node = array_pop($stack);
+                if (is_array($node)) {
+                    foreach ($node as $value) {
+                        if (is_string($value) && preg_match('#/hotels?/(?:detail/)?\d+#i', $value)) {
+                            $norm = self::normalize_klook_link($value);
+                            if ($norm) $links[] = $norm;
+                        } elseif (is_array($value)) {
+                            $stack[] = $value;
+                        }
+                    }
                 }
             }
         }
@@ -1338,15 +1370,25 @@ public static function discover_import_urls() {
     }
     $new_links = array_slice($new_links, 0, $limit);
     if (empty($new_links)) {
-        // All items already exist — return success with empty list so the marathon skips gracefully
-        // (not an error; user can enable "Force Update" to re-import existing items)
-        self::send_json_success_clean(array(
-            'urls'         => array(),
-            'total'        => 0,
-            'skipped'      => $already_count,
-            'force_update' => $force_update,
-            'message'      => 'Tous les articles sont déjà dans la base de données. Activez "Forcer la mise à jour" pour les réimporter.',
-        ));
+        if (empty($all_links)) {
+            // Nothing discovered at all — listing page returned no URLs
+            self::send_json_success_clean(array(
+                'urls'         => array(),
+                'total'        => 0,
+                'skipped'      => 0,
+                'force_update' => $force_update,
+                'message'      => 'Aucune URL trouvée sur la page de listing. Vérifiez l\'URL et réessayez (la page est peut-être protégée).',
+            ));
+        } else {
+            // Found URLs but all already in DB — user needs Force Update to re-import
+            self::send_json_success_clean(array(
+                'urls'         => array(),
+                'total'        => 0,
+                'skipped'      => $already_count,
+                'force_update' => $force_update,
+                'message'      => 'Tous les articles sont déjà dans la base de données. Activez "Forcer la mise à jour" pour les réimporter.',
+            ));
+        }
     }
     self::send_json_success_clean(array(
         'urls'         => $new_links,
