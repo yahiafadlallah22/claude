@@ -483,18 +483,154 @@ class FTH_Templates {
     }
 
     /**
+     * Return the right emoji for a category term (slug or name string accepted).
+     * Used in Things-to-Do filter bar, category pages, and on auto-import.
+     */
+    public static function get_category_emoji($term) {
+        $slug = is_object($term) ? $term->slug : sanitize_title((string) $term);
+        $name = is_object($term) ? strtolower($term->name) : strtolower((string) $term);
+
+        $map = array(
+            // Adventure & Outdoors
+            'adventure'             => '🏔️','adventure-tours'       => '🏔️','adventure-sports'      => '🧗',
+            'outdoor'               => '🌿','outdoor-activities'    => '🌿','hiking'                => '🥾',
+            'cycling'               => '🚴','rock-climbing'         => '🧗','zip-line'              => '🪂',
+            'zip-lining'            => '🪂','skydiving'             => '🪂','paragliding'           => '🪂',
+            'bungee-jumping'        => '🪂','extreme-sports'        => '🧗',
+            // Water
+            'water-sports'          => '🏄','water-activities'      => '🌊','scuba-diving'          => '🤿',
+            'snorkeling'            => '🤿','surfing'               => '🏄','kayaking'              => '🛶',
+            'boat-tours'            => '⛵','cruises'               => '🚢','cruise'                => '🚢',
+            'yacht'                 => '⛵','dhow-cruise'           => '⛵','ferry'                 => '⛴️',
+            'speedboat'             => '🚤','diving'                => '🤿','beaches'               => '🏖️',
+            'beach'                 => '🏖️','swimming'              => '🏊','fishing'               => '🎣',
+            'boat-ride'             => '⛵','river-cruise'          => '🚢',
+            // City & Culture
+            'city-tours'            => '🌆','city-tour'             => '🌆','sightseeing'           => '🌆',
+            'culture'               => '🏛️','cultural'              => '🏛️','cultural-experiences'  => '🏛️',
+            'cultural-tours'        => '🏛️','historical'            => '🏺','historical-tours'      => '🏺',
+            'heritage'              => '🏺','architecture'          => '🏛️','traditional'           => '🏺',
+            'religious'             => '🕌','mosque'                => '🕌','temple'                => '⛩️',
+            'church'                => '⛪',
+            // Attractions & Tickets
+            'attractions'           => '🎡','theme-parks'           => '🎢','theme-park'            => '🎢',
+            'amusement-parks'       => '🎢','museums'               => '🎨','museum'                => '🎨',
+            'observation-decks'     => '🔭','observation-deck'      => '🔭','lookout'               => '🔭',
+            'tickets'               => '🎟️','entry-tickets'         => '🎟️','skip-the-line'         => '🎟️',
+            // Food & Drink
+            'food'                  => '🍽️','dining'                => '🍽️','dining-experiences'    => '🍽️',
+            'food-tours'            => '🍜','cooking'               => '👨‍🍳','cooking-classes'       => '👨‍🍳',
+            'wine-tasting'          => '🍷','coffee'                => '☕','brunch'                => '🥐',
+            'bbq'                   => '🍖','seafood'               => '🦞',
+            // Entertainment
+            'shows'                 => '🎭','entertainment'         => '🎭','nightlife'             => '🌙',
+            'night-tour'            => '🌙','concerts'              => '🎵','music'                 => '🎵',
+            'comedy'                => '🎭','circus'                => '🎪','theater'               => '🎭',
+            'theatre'               => '🎭','live-shows'            => '🎭',
+            // Family
+            'family'                => '👨‍👩‍👧‍👦','family-activities'     => '👨‍👩‍👧‍👦','family-friendly'       => '👨‍👩‍👧‍👦',
+            'kids'                  => '🧒','children'              => '🧒',
+            // Desert & Nature
+            'desert'                => '🐪','desert-safari'         => '🐪','safari'                => '🦁',
+            'wildlife'              => '🦁','zoo'                   => '🦒','nature'                => '🌿',
+            'garden'                => '🌸','gardens'               => '🌸','forest'                => '🌲',
+            'national-park'         => '🌲','mountains'             => '⛰️',
+            // Transport & Day Trips
+            'transfer'              => '🚗','transfers'             => '🚗','day-trips'             => '🚗',
+            'day-trip'              => '🚗','bus-tours'             => '🚌','helicopter'            => '🚁',
+            'hot-air-balloon'       => '🎈','private-tours'         => '🚗','private-transfer'      => '🚗',
+            // Wellness
+            'wellness'              => '💆','spa'                   => '💆','yoga'                  => '🧘',
+            'meditation'            => '🧘','massage'               => '💆',
+            // Sports
+            'sports'                => '⚽','golf'                  => '⛳','tennis'                => '🎾',
+            'horse-riding'          => '🐎','motorsport'            => '🏎️','marathon'              => '🏃',
+            // Photography & Art
+            'photography'           => '📸','art'                   => '🎨',
+            // Shopping
+            'shopping'              => '🛍️','markets'               => '🛒',
+            // Generic
+            'things-to-do'          => '🗺️','tours'                 => '🚌',
+        );
+
+        if (isset($map[$slug])) return $map[$slug];
+
+        // Keyword fallback on normalised name
+        $kw = array(
+            'adventure'  => '🏔️','outdoor'   => '🌿','hik'       => '🥾','cycl'      => '🚴',
+            'sky'        => '🪂','parag'     => '🪂','bungee'    => '🪂','extreme'   => '🧗',
+            'water'      => '🌊','swim'      => '🏊','scuba'     => '🤿','snorkel'   => '🤿',
+            'surf'       => '🏄','kayak'     => '🛶','boat'      => '⛵','cruise'    => '🚢',
+            'yacht'      => '⛵','dhow'      => '⛵','ferry'     => '⛴️','beach'     => '🏖️',
+            'diving'     => '🤿','fishing'   => '🎣',
+            'city'       => '🌆','sightsee'  => '🌆','cultur'    => '🏛️','histor'    => '🏺',
+            'heritag'    => '🏺','mosque'    => '🕌','temple'    => '⛩️',
+            'museum'     => '🎨','theme park'=> '🎢','amusement' => '🎢',
+            'observation'=> '🔭','attraction'=> '🎡','ticket'    => '🎟️',
+            'food'       => '🍽️','dining'   => '🍽️','cook'      => '👨‍🍳','wine'      => '🍷',
+            'show'       => '🎭','night'     => '🌙','concert'   => '🎵','music'     => '🎵',
+            'family'     => '👨‍👩‍👧‍👦','kid'       => '🧒','children'  => '🧒',
+            'desert'     => '🐪','safari'    => '🦁','wildlife'  => '🦁','zoo'       => '🦒',
+            'natur'      => '🌿','garden'    => '🌸','forest'    => '🌲','mountain'  => '⛰️',
+            'transfer'   => '🚗','day trip'  => '🚗','day-trip'  => '🚗',
+            'helicopter' => '🚁','balloon'   => '🎈',
+            'wellness'   => '💆','spa'       => '💆','yoga'      => '🧘',
+            'sport'      => '⚽','golf'      => '⛳','horse'     => '🐎',
+            'photo'      => '📸','shopping'  => '🛍️',
+        );
+        foreach ($kw as $keyword => $emoji) {
+            if (strpos($name, $keyword) !== false) return $emoji;
+        }
+        return '🎟️';
+    }
+
+    /**
      * Get a best-effort flag for a country term
      */
     public static function get_country_flag($country) {
         $slug = is_object($country) ? $country->slug : sanitize_title((string) $country);
         $name = is_object($country) ? strtolower($country->name) : strtolower((string) $country);
         $map = array(
-            'united-arab-emirates' => '🇦🇪', 'uae' => '🇦🇪', 'dubai' => '🇦🇪',
-            'saudi-arabia' => '🇸🇦', 'qatar' => '🇶🇦', 'oman' => '🇴🇲', 'bahrain' => '🇧🇭', 'kuwait' => '🇰🇼',
-            'egypt' => '🇪🇬', 'morocco' => '🇲🇦', 'turkey' => '🇹🇷', 'thailand' => '🇹🇭', 'singapore' => '🇸🇬',
-            'japan' => '🇯🇵', 'south-korea' => '🇰🇷', 'indonesia' => '🇮🇩', 'malaysia' => '🇲🇾', 'vietnam' => '🇻🇳',
-            'united-kingdom' => '🇬🇧', 'france' => '🇫🇷', 'italy' => '🇮🇹', 'spain' => '🇪🇸', 'germany' => '🇩🇪',
-            'switzerland' => '🇨🇭', 'united-states' => '🇺🇸', 'canada' => '🇨🇦', 'mexico' => '🇲🇽', 'australia' => '🇦🇺'
+            // Middle East
+            'united-arab-emirates' => '🇦🇪','uae'          => '🇦🇪','dubai'        => '🇦🇪',
+            'saudi-arabia'         => '🇸🇦','qatar'        => '🇶🇦','oman'         => '🇴🇲',
+            'bahrain'              => '🇧🇭','kuwait'       => '🇰🇼','jordan'       => '🇯🇴',
+            'lebanon'              => '🇱🇧','israel'       => '🇮🇱','iraq'         => '🇮🇶',
+            'iran'                 => '🇮🇷','yemen'        => '🇾🇪','syria'        => '🇸🇾',
+            // Africa
+            'egypt'                => '🇪🇬','morocco'      => '🇲🇦','tunisia'      => '🇹🇳',
+            'algeria'              => '🇩🇿','south-africa' => '🇿🇦','kenya'        => '🇰🇪',
+            'tanzania'             => '🇹🇿','ethiopia'     => '🇪🇹','nigeria'      => '🇳🇬',
+            'ghana'                => '🇬🇭','senegal'      => '🇸🇳','madagascar'   => '🇲🇬',
+            'mauritius'            => '🇲🇺','seychelles'   => '🇸🇨','zanzibar'     => '🇹🇿',
+            // Europe
+            'turkey'               => '🇹🇷','greece'       => '🇬🇷','italy'        => '🇮🇹',
+            'spain'                => '🇪🇸','france'       => '🇫🇷','germany'      => '🇩🇪',
+            'united-kingdom'       => '🇬🇧','uk'           => '🇬🇧','england'      => '🇬🇧',
+            'portugal'             => '🇵🇹','netherlands'  => '🇳🇱','belgium'      => '🇧🇪',
+            'switzerland'          => '🇨🇭','austria'      => '🇦🇹','czech-republic'=> '🇨🇿',
+            'poland'               => '🇵🇱','hungary'      => '🇭🇺','romania'      => '🇷🇴',
+            'croatia'              => '🇭🇷','sweden'       => '🇸🇪','norway'       => '🇳🇴',
+            'denmark'              => '🇩🇰','finland'      => '🇫🇮','iceland'      => '🇮🇸',
+            'russia'               => '🇷🇺','ukraine'      => '🇺🇦','serbia'       => '🇷🇸',
+            // Asia-Pacific
+            'thailand'             => '🇹🇭','singapore'    => '🇸🇬','malaysia'     => '🇲🇾',
+            'indonesia'            => '🇮🇩','vietnam'      => '🇻🇳','philippines'  => '🇵🇭',
+            'japan'                => '🇯🇵','south-korea'  => '🇰🇷','korea'        => '🇰🇷',
+            'china'                => '🇨🇳','hong-kong'    => '🇭🇰','taiwan'       => '🇹🇼',
+            'macau'                => '🇲🇴','india'        => '🇮🇳','sri-lanka'    => '🇱🇰',
+            'nepal'                => '🇳🇵','pakistan'     => '🇵🇰','bangladesh'   => '🇧🇩',
+            'cambodia'             => '🇰🇭','laos'         => '🇱🇦','myanmar'      => '🇲🇲',
+            'maldives'             => '🇲🇻','bhutan'       => '🇧🇹',
+            // Americas
+            'united-states'        => '🇺🇸','usa'          => '🇺🇸','canada'       => '🇨🇦',
+            'mexico'               => '🇲🇽','brazil'       => '🇧🇷','argentina'    => '🇦🇷',
+            'colombia'             => '🇨🇴','peru'         => '🇵🇪','chile'        => '🇨🇱',
+            'costa-rica'           => '🇨🇷','cuba'         => '🇨🇺','jamaica'      => '🇯🇲',
+            'dominican-republic'   => '🇩🇴','ecuador'      => '🇪🇨','bolivia'      => '🇧🇴',
+            // Oceania
+            'australia'            => '🇦🇺','new-zealand'  => '🇳🇿','fiji'         => '🇫🇯',
+            'hawaii'               => '🇺🇸',
         );
         if (isset($map[$slug])) return $map[$slug];
         foreach ($map as $k => $v) {

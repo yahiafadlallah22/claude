@@ -63,6 +63,14 @@ body.tax-travel_city .widget-area,body.tax-travel_city .sidebar,body.tax-travel_
 .klc-footer-nav ul li a:hover{color:#fff}
 @media(max-width:1100px){.klc-search{grid-template-columns:1fr 1fr}.klc-grid{grid-template-columns:repeat(2,minmax(0,1fr))}}
 @media(max-width:640px){.klc-title{font-size:32px}.klc-search{grid-template-columns:1fr}.klc-grid{grid-template-columns:1fr}.klc-footer-nav-in{grid-template-columns:1fr}}
+.klc-faq-item{border:1px solid #e8e8e8;border-radius:10px;margin-bottom:8px;overflow:hidden}
+.klc-faq-q{display:flex;justify-content:space-between;align-items:center;padding:14px 16px;cursor:pointer;font-weight:700;font-size:14px;background:#fafafa;gap:10px}
+.klc-faq-q:hover{background:#f0f7ff}
+.klc-faq-arrow{flex-shrink:0;font-size:11px;transition:transform .2s}
+.klc-faq-item.open .klc-faq-arrow{transform:rotate(180deg)}
+.klc-faq-a{display:none;padding:14px 16px;font-size:14px;color:#444;line-height:1.7;border-top:1px solid #eee}
+.klc-faq-item.open .klc-faq-a{display:block}
+.klc-faq-item.open .klc-faq-q{background:#f0f7ff}
 </style>
 <div class="klc">
   <section class="klc-hero">
@@ -130,6 +138,28 @@ body.tax-travel_city .widget-area,body.tax-travel_city .sidebar,body.tax-travel_
   </section>
   <?php endif; ?>
 
+  <?php
+  $city_faq_raw = get_term_meta($term->term_id, '_fth_faq', true);
+  if ($city_faq_raw):
+    $city_faq_blocks = array_filter(array_map('trim', explode("\n\n", $city_faq_raw)));
+  ?>
+  <section class="klc-section" style="background:#fff;padding-top:0">
+    <div class="klc-wrap">
+      <div class="klc-head"><h2>❓ FAQ – <?php echo esc_html($term->name); ?></h2></div>
+      <?php foreach ($city_faq_blocks as $block):
+        if (preg_match('/^Q:\s*(.+)/u', $block, $mq) && preg_match('/\nA:\s*(.+)/us', $block, $ma)): ?>
+        <div class="klc-faq-item">
+          <div class="klc-faq-q" onclick="this.parentElement.classList.toggle('open')">
+            <span><?php echo esc_html($mq[1]); ?></span>
+            <span class="klc-faq-arrow">▼</span>
+          </div>
+          <div class="klc-faq-a"><?php echo esc_html(trim($ma[1])); ?></div>
+        </div>
+        <?php endif; endforeach; ?>
+    </div>
+  </section>
+  <?php endif; ?>
+
   <?php echo FTH_Templates::render_seo_footer('activities'); ?>
 
   <footer class="klc-footer-nav">
@@ -158,4 +188,7 @@ body.tax-travel_city .widget-area,body.tax-travel_city .sidebar,body.tax-travel_
     </div>
   </footer>
 </div>
+<script>
+document.querySelectorAll('.klc-faq-q').forEach(function(q){q.addEventListener('click',function(){this.parentElement.classList.toggle('open');});});
+</script>
 <?php get_footer(); ?>

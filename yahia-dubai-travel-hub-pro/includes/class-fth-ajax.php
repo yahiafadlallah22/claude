@@ -49,6 +49,10 @@ class FTH_Ajax {
         add_action('wp_ajax_fth_import_bulk_hotels', array(__CLASS__, 'import_bulk_hotels'));
         add_action('wp_ajax_fth_import_bulk_urls', array(__CLASS__, 'import_bulk_urls'));
         add_action('wp_ajax_fth_import_bulk_country', array(__CLASS__, 'import_bulk_country'));
+        // Live import: discover URLs without importing (step 1 of progressive import)
+        add_action('wp_ajax_fth_discover_import_urls', array(__CLASS__, 'discover_import_urls'));
+        // Live import: import a single URL and return rich preview data
+        add_action('wp_ajax_fth_import_single_live', array(__CLASS__, 'import_single_live'));
     }
     
 
@@ -177,6 +181,60 @@ private static function build_affiliate_redirect($url) {
 }
 
 /**
+ * Fetch a Klook LISTING page for link extraction only.
+ *
+ * Much faster than fetch_klook_html() — skips render=true ScraperAPI and
+ * Wayback Machine because listing pages only need basic HTML to extract hrefs.
+ * Tries: 1. Direct cURL  2. ScraperAPI (no render)  3. ScraperAPI (render, capped 60s)
+ *
+ * @param  string $url  Klook listing/destination URL
+ * @return string       Raw HTML body (may be empty on total failure)
+ */
+private static function fetch_klook_listing_html($url) {
+    // 1. Direct cURL — fast, often works for listing pages
+    $r = self::remote_get($url, array('timeout' => 20));
+    if (!is_wp_error($r)) {
+        $b = wp_remote_retrieve_body($r);
+        // Accept if we got a real page (contains activity links or Next data)
+        if (!empty($b) && (strpos($b, 'klook.com/activity/') !== false || strpos($b, 'klook.com/en-US/activity/') !== false || strpos($b, '__NEXT_DATA__') !== false)) {
+            return $b;
+        }
+    }
+
+    // 2. ScraperAPI without render (fast, ~5s, bypasses basic Cloudflare)
+    $sa_key = self::get_scraperapi_key();
+    if (!empty($sa_key)) {
+        $sa_url = 'https://api.scraperapi.com?' . http_build_query(array(
+            'api_key'      => $sa_key,
+            'url'          => $url,
+            'country_code' => 'us',
+        ));
+        $sa_r = self::remote_get($sa_url, array('timeout' => 35));
+        if (!is_wp_error($sa_r)) {
+            $sa_b = wp_remote_retrieve_body($sa_r);
+            if (!empty($sa_b) && (strpos($sa_b, 'klook.com/activity/') !== false || strpos($sa_b, '__NEXT_DATA__') !== false)) {
+                return $sa_b;
+            }
+        }
+
+        // 3. ScraperAPI with render=true as last resort (but capped at 60s not 120s)
+        $sa_url2 = 'https://api.scraperapi.com?' . http_build_query(array(
+            'api_key'      => $sa_key,
+            'url'          => $url,
+            'render'       => 'true',
+            'country_code' => 'us',
+        ));
+        $sa_r2 = self::remote_get($sa_url2, array('timeout' => 60));
+        if (!is_wp_error($sa_r2)) {
+            $sa_b2 = wp_remote_retrieve_body($sa_r2);
+            if (!empty($sa_b2)) return $sa_b2;
+        }
+    }
+
+    return '';
+}
+
+/**
  * Fetch a Klook page HTML with multiple bypass strategies for Cloudflare.
  *
  * Tries (in order):
@@ -195,20 +253,56 @@ private static function fetch_klook_html($url) {
     $result    = array('body' => '', 'url' => $url, 'source' => 'none');
     $best_body = '';
 
-    // ── 1. Direct cURL with Chrome 124 headers ────────────────────────
-    $r = self::remote_get($url, array('timeout' => 45));
+    // ── 1. ScraperAPI render=true (FIRST — guaranteed Cloudflare bypass) ─
+    // Klook uses Cloudflare Bot Management which blocks all non-browser cURL.
+    // ScraperAPI with render=true uses real headless Chrome → always gets __NEXT_DATA__.
+    $sa_key = self::get_scraperapi_key();
+    if (!empty($sa_key)) {
+        $sa_url = 'https://api.scraperapi.com?' . http_build_query(array(
+            'api_key'      => $sa_key,
+            'url'          => $url,
+            'render'       => 'true',
+            'country_code' => 'us',
+            'keep_headers' => 'true',
+        ));
+        $sa_r = self::remote_get($sa_url, array('timeout' => 120));
+        if (!is_wp_error($sa_r)) {
+            $sa_b = wp_remote_retrieve_body($sa_r);
+            if (!empty($sa_b) && strpos($sa_b, '__NEXT_DATA__') !== false) {
+                return array('body' => $sa_b, 'url' => $url, 'source' => 'scraperapi');
+            }
+            if (!empty($sa_b)) $best_body = $sa_b;
+        }
+        // Also try without render (faster, fewer credits, works when Cloudflare is lighter)
+        $sa_url2 = 'https://api.scraperapi.com?' . http_build_query(array(
+            'api_key'      => $sa_key,
+            'url'          => $url,
+            'country_code' => 'us',
+        ));
+        $sa_r2 = self::remote_get($sa_url2, array('timeout' => 60));
+        if (!is_wp_error($sa_r2)) {
+            $sa_b2 = wp_remote_retrieve_body($sa_r2);
+            if (!empty($sa_b2) && strpos($sa_b2, '__NEXT_DATA__') !== false) {
+                return array('body' => $sa_b2, 'url' => $url, 'source' => 'scraperapi_fast');
+            }
+            if (!empty($sa_b2) && empty($best_body)) $best_body = $sa_b2;
+        }
+    }
+
+    // ── 2. Direct cURL with Chrome 124 headers (fast but Cloudflare-blocked) ─
+    $r = self::remote_get($url, array('timeout' => 30));
     if (!is_wp_error($r)) {
         $b = wp_remote_retrieve_body($r);
         if (!empty($b) && strpos($b, '__NEXT_DATA__') !== false) {
             return array('body' => $b, 'url' => $url, 'source' => 'direct');
         }
-        if (!empty($b)) $best_body = $b;
+        if (!empty($b) && empty($best_body)) $best_body = $b;
     }
 
-    // ── 2. Without /en-US/ locale ────────────────────────────────────
+    // ── 3. Without /en-US/ locale ────────────────────────────────────
     if (strpos($url, '/en-US/') !== false) {
         $url_nl = preg_replace('#/en-US/#', '/', $url);
-        $r2 = self::remote_get($url_nl, array('timeout' => 45));
+        $r2 = self::remote_get($url_nl, array('timeout' => 25));
         if (!is_wp_error($r2)) {
             $b2 = wp_remote_retrieve_body($r2);
             if (!empty($b2) && strpos($b2, '__NEXT_DATA__') !== false) {
@@ -217,7 +311,7 @@ private static function fetch_klook_html($url) {
         }
     }
 
-    // ── 3. Wayback Machine CDX API → precise timestamp → raw if_ fetch ─
+    // ── 4. Wayback Machine CDX API → precise timestamp → raw if_ fetch ─
     // NOTE: Google Web Cache was permanently shut down in February 2024.
     // We use the CDX API instead: it returns the exact snapshot timestamp,
     // then we fetch the raw HTML using the "if_" modifier which strips the
@@ -251,7 +345,7 @@ private static function fetch_klook_html($url) {
         }
     }
 
-    // ── 4. Wayback Machine availability API (simpler fallback) ────────
+    // ── 5. Wayback Machine availability API (simpler fallback) ────────
     $avail_r = self::remote_get('https://archive.org/wayback/available?url=' . rawurlencode($url_bare), array('timeout' => 20));
     if (!is_wp_error($avail_r)) {
         $avail = json_decode(wp_remote_retrieve_body($avail_r), true);
@@ -369,6 +463,11 @@ private static function array_collect_values($data, $keys, &$results = array()) 
     if (!is_array($data)) {
         return $results;
     }
+    // All known Klook sub-keys that hold the actual URL inside an image object
+    static $url_sub_keys = array(
+        'url','src','imgUrl','imageUrl','coverImageUrl','originalUrl','large','medium',
+        'original','imgSrc','thumbnailUrl','thumbnail','cover','href',
+    );
     foreach ($data as $key => $value) {
         if (in_array($key, $keys, true)) {
             if (is_string($value) && $value !== '') {
@@ -378,7 +477,7 @@ private static function array_collect_values($data, $keys, &$results = array()) 
                     if (is_string($sub) && $sub !== '') {
                         $results[] = $sub;
                     } elseif (is_array($sub)) {
-                        $maybe = self::array_find_first($sub, array('url', 'src', 'imageUrl', 'coverImageUrl', 'originalUrl'));
+                        $maybe = self::array_find_first($sub, $url_sub_keys);
                         if (is_string($maybe) && $maybe !== '') {
                             $results[] = $maybe;
                         }
@@ -442,26 +541,65 @@ private static function is_valid_content_image_url($url) {
     if (!preg_match('#^https?://#i', $url)) {
         return false;
     }
-    $blocked = array('logo', 'icon', 'avatar', 'sprite', 'placeholder', 'favicon', 'apple-touch-icon', 'app-store', 'google-play');
+    // Always-blocked keywords in URL path
+    $blocked = array(
+        'logo', '/icon', 'avatar', 'sprite', 'placeholder', 'favicon',
+        'apple-touch-icon', 'app-store', 'google-play', '/badge', '/tag/',
+        '/label/', 'category-icon', '/flag/', 'star-rating', 'review-badge',
+        '/ui/', '/button/', 'payment-', 'visa-', 'mastercard-',
+        // Non-activity images: user profiles, partner logos, reviewer photos
+        '/profile/', '/reviewer/', 'review-avatar', '/partner-', 'profile-photo', '/user-icon',
+        '/staff/', '/team/', '/author-', '-author-',
+    );
     foreach ($blocked as $word) {
         if (stripos($url, $word) !== false) {
             return false;
         }
     }
-    // Always accept Klook CDN URLs — their image URLs often lack a file extension
+    // Klook CDN — extra filtering for small/icon transformations
     if (stripos($url, 'res.klook.com') !== false) {
+        // Reject if explicit width or height < 400 (thumbnail/icon) – after upgrade
+        // un-upgraded URLs with small dims still get filtered here
+        if (preg_match('#[,/](?:w|h)_(\d+)#', $url, $dim_m)) {
+            if ((int) $dim_m[1] < 400) {
+                return false;
+            }
+        }
+        // Reject icon/thumb crop modes embedded in Cloudinary transformation string
+        if (preg_match('#[,/]c_(?:thumb|icon|pad_thumb|lpad)[,/]#', $url)) {
+            return false;
+        }
+        // Accept all other Klook CDN images (full-size activity/hotel photos)
         return true;
     }
     return (bool) preg_match('/\.(jpe?g|png|webp)(\?.*)?$/i', $url);
 }
 
 private static function clean_image_urls($urls, $limit = 5) {
-    $clean = array();
+    // Sort: prefer full-size res.klook.com images first, then other valid images
+    $priority = array();
+    $rest     = array();
     foreach ((array) $urls as $url) {
         $url = esc_url_raw(html_entity_decode((string) $url, ENT_QUOTES, 'UTF-8'));
+        // ── Upgrade Klook Cloudinary URLs to 1080×720 BEFORE filtering ──────
+        // This normalises all size-variants of the same photo to an identical URL,
+        // so the deduplication below removes them correctly.
+        $url = self::upgrade_klook_image_url($url);
         if (!$url || !self::is_valid_content_image_url($url)) {
             continue;
         }
+        // Prefer Klook CDN images that look like full-size content photos
+        if (stripos($url, 'res.klook.com') !== false &&
+            (strpos($url, '/activities/') !== false || strpos($url, '/htl-img/') !== false ||
+             strpos($url, '/activity-img/') !== false || strpos($url, '/upload/') !== false)) {
+            $priority[] = $url;
+        } else {
+            $rest[] = $url;
+        }
+    }
+    $all   = array_merge($priority, $rest);
+    $clean = array();
+    foreach ($all as $url) {
         if (!in_array($url, $clean, true)) {
             $clean[] = $url;
         }
@@ -563,6 +701,21 @@ private static function maybe_hotel_price($value) {
 private static function image_compare_key($url) {
     $url = preg_replace('/\?.*$/', '', (string) $url);
     return strtolower(trim($url));
+}
+
+/**
+ * Upgrade Klook Cloudinary CDN URLs to full-size (1080×720) so all variants
+ * of the same photo produce the same URL after normalisation, enabling
+ * reliable deduplication.
+ */
+private static function upgrade_klook_image_url($url) {
+    if (stripos($url, 'res.klook.com/image/upload/') !== false) {
+        // Replace every Cloudinary transform segment (e.g. "c_fill,w_400,h_267/")
+        // with one high-quality setting. Transform segments start with a short
+        // lowercase prefix followed by underscore (c_, w_, h_, q_, fl_, ar_…).
+        $url = preg_replace('#(/image/upload/)(?:[a-z][a-z_0-9]{0,3}_[^/]+/)+#', '$1q_85,c_fill,w_1080,h_720/', $url);
+    }
+    return $url;
 }
 
 private static function normalize_price_amount($value, $minimum = 1) {
@@ -834,8 +987,10 @@ private static function sideload_from_proxy_cache($image_url, $post_id) {
  * Download a remote image and attach it to a post.
  * Uses a Klook Referer header so res.klook.com CDN allows the download.
  * Falls back to storing the URL as external meta if download fails.
+ *
+ * @param string $seo_name Optional SEO-friendly filename base (no extension). Uses URL basename if empty.
  */
-private static function sideload_image_with_referer($image_url, $post_id, $referer = 'https://www.klook.com') {
+private static function sideload_image_with_referer($image_url, $post_id, $referer = 'https://www.klook.com', $seo_name = '') {
     if (!function_exists('wp_handle_sideload')) {
         require_once ABSPATH . 'wp-admin/includes/media.php';
         require_once ABSPATH . 'wp-admin/includes/file.php';
@@ -915,9 +1070,13 @@ private static function sideload_image_with_referer($image_url, $post_id, $refer
     $ext = isset($ext_map[$content_type]) ? $ext_map[$content_type] : 'jpg';
 
     // Build file data array for wp_handle_sideload
-    $basename = sanitize_file_name(basename(strtok($image_url, '?')));
-    if (!preg_match('/\.(jpg|jpeg|png|gif|webp|avif)$/i', $basename)) {
-        $basename .= '.' . $ext;
+    if (!empty($seo_name)) {
+        $basename = sanitize_file_name($seo_name) . '.' . $ext;
+    } else {
+        $basename = sanitize_file_name(basename(strtok($image_url, '?')));
+        if (!preg_match('/\.(jpg|jpeg|png|gif|webp|avif)$/i', $basename)) {
+            $basename .= '.' . $ext;
+        }
     }
     $file = array(
         'name'     => $basename,
@@ -934,9 +1093,13 @@ private static function sideload_image_with_referer($image_url, $post_id, $refer
         return new WP_Error('sideload_failed', $sideload['error']);
     }
 
+    $att_title = !empty($seo_name)
+        ? sanitize_text_field(str_replace('-', ' ', $seo_name))
+        : sanitize_text_field(pathinfo($sideload['file'], PATHINFO_FILENAME));
+
     $attachment = array(
         'post_mime_type' => $sideload['type'],
-        'post_title'     => sanitize_text_field(pathinfo($sideload['file'], PATHINFO_FILENAME)),
+        'post_title'     => $att_title,
         'post_content'   => '',
         'post_status'    => 'inherit',
     );
@@ -958,6 +1121,23 @@ private static function import_post_images($post_id, $main_image, $gallery = arr
         return;
     }
 
+    // Build SEO-friendly base name from post title + city
+    $post       = get_post($post_id);
+    $post_slug  = $post ? sanitize_title($post->post_title) : 'activity';
+    $post_type  = $post ? $post->post_type : 'travel_activity';
+    $type_label = ($post_type === 'travel_hotel') ? 'hotel' : 'activity';
+    // Activities use only the main featured image (no gallery needed – keeps pages clean)
+    if ($post_type === 'travel_activity') {
+        $gallery = array();
+    }
+    $city_terms = wp_get_object_terms($post_id, 'travel_city', array('fields' => 'slugs'));
+    $city_slug  = (!is_wp_error($city_terms) && !empty($city_terms)) ? $city_terms[0] : '';
+    $seo_base   = $city_slug ? "{$post_slug}-{$type_label}-{$city_slug}" : "{$post_slug}-{$type_label}";
+    // Truncate to keep filename reasonable
+    if (strlen($seo_base) > 80) {
+        $seo_base = substr($seo_base, 0, 80);
+    }
+
     $gallery_attachment_ids = array();
     $all_attachment_ids     = array();
     $main_key               = self::image_compare_key($main_image);
@@ -966,8 +1146,10 @@ private static function import_post_images($post_id, $main_image, $gallery = arr
         // Always store the raw URL first so the card displays even if sideload fails
         update_post_meta($post_id, '_fth_external_image', esc_url_raw($main_image));
 
+        $main_seo = $seo_base . '-photo-1';
+
         // Attempt 1: direct cURL download with Klook Referer (works for res.klook.com CDN)
-        $attachment_id = self::sideload_image_with_referer($main_image, $post_id);
+        $attachment_id = self::sideload_image_with_referer($main_image, $post_id, 'https://www.klook.com', $main_seo);
 
         // Attempt 2: read from proxy disk cache (populated when visitors browse pages)
         // or fetch inline with the same Chrome headers the proxy uses — no HTTP loopback.
@@ -979,7 +1161,7 @@ private static function import_post_images($post_id, $main_image, $gallery = arr
         if (is_wp_error($attachment_id) && class_exists('Flavor_Travel_Hub')) {
             $proxy_url = Flavor_Travel_Hub::fth_img_url($main_image);
             if ($proxy_url && $proxy_url !== $main_image) {
-                $attachment_id = self::sideload_image_with_referer($proxy_url, $post_id, home_url());
+                $attachment_id = self::sideload_image_with_referer($proxy_url, $post_id, home_url(), $main_seo);
             }
         }
 
@@ -992,35 +1174,494 @@ private static function import_post_images($post_id, $main_image, $gallery = arr
         // else: external URL is already saved above, templates display via proxy
     }
 
-    $gallery_urls = array();
+    $gallery_deduped = array();
     foreach ((array) $gallery as $img) {
         if (!$img || self::image_compare_key($img) === $main_key) {
-            continue;
+            continue; // skip main image (already upgraded & compared)
         }
-        $gallery_urls[] = esc_url_raw($img);
-        if (count($gallery_urls) >= 6) {
+        $gallery_deduped[] = $img;
+        if (count($gallery_deduped) >= 6) {
             break;
         }
     }
-    if (!empty($gallery_urls)) {
-        foreach ($gallery_urls as $img) {
-            $gallery_id = self::sideload_image_with_referer($img, $post_id);
-            if (!is_wp_error($gallery_id) && $gallery_id) {
-                $gallery_id = (int) $gallery_id;
-                if (!in_array($gallery_id, $gallery_attachment_ids, true)) {
-                    $gallery_attachment_ids[] = $gallery_id;
-                    $all_attachment_ids[]     = $gallery_id;
-                }
+    // Sideload each gallery image; only store external URL as fallback when sideload fails
+    $gallery_index    = 2;
+    $external_fallback = array();
+    foreach ($gallery_deduped as $img) {
+        $gallery_seo = $seo_base . '-photo-' . $gallery_index++;
+        $gallery_id  = self::sideload_image_with_referer($img, $post_id, 'https://www.klook.com', $gallery_seo);
+        if (!is_wp_error($gallery_id) && $gallery_id) {
+            $gallery_id = (int) $gallery_id;
+            if (!in_array($gallery_id, $gallery_attachment_ids, true)) {
+                $gallery_attachment_ids[] = $gallery_id;
+                $all_attachment_ids[]     = $gallery_id;
             }
-        }
-        update_post_meta($post_id, '_fth_external_gallery', implode(',', $gallery_urls));
-        if (!empty($gallery_attachment_ids)) {
-            update_post_meta($post_id, '_fth_gallery', implode(',', $gallery_attachment_ids));
+        } else {
+            // Sideload failed – keep as external URL so the template can show it via proxy
+            $external_fallback[] = $img;
         }
     }
+    // Persist: WP attachment IDs for successfully sideloaded images,
+    // external URLs ONLY for those that failed (no duplication with thumbnail).
+    if (!empty($gallery_attachment_ids)) {
+        update_post_meta($post_id, '_fth_gallery', implode(',', $gallery_attachment_ids));
+    }
+    update_post_meta($post_id, '_fth_external_gallery', implode(',', $external_fallback));
     if (!empty($all_attachment_ids)) {
         update_post_meta($post_id, '_fth_imported_attachment_ids', implode(',', array_unique($all_attachment_ids)));
     }
+}
+
+/**
+ * Discover URLs to import (step 1 of live progressive import).
+ * Returns the list of new Klook URLs without actually importing anything.
+ */
+public static function discover_import_urls() {
+    self::begin_import_request();
+    if (!check_ajax_referer('fth_import_publish', 'nonce', false)) {
+        self::send_json_error_clean('Security check failed');
+    }
+    if (!current_user_can('edit_posts')) {
+        self::send_json_error_clean('Unauthorized');
+    }
+    $type  = isset($_POST['type']) ? sanitize_text_field($_POST['type']) : 'activity';
+    $url   = isset($_POST['url']) ? esc_url_raw($_POST['url']) : '';
+    $city  = isset($_POST['city']) ? intval($_POST['city']) : 0;
+    $limit = isset($_POST['limit']) ? max(1, min(200, intval($_POST['limit']))) : 50;
+    if (empty($url)) {
+        self::send_json_error_clean('Please enter a destination URL');
+    }
+    $real_url = self::extract_real_klook_url($url);
+    // Normalise locale to en-US
+    if (strpos($real_url, 'klook.com') !== false) {
+        $real_url = preg_replace('#(https?://(?:www\.)?klook\.com)/[a-z]{2}[-_][A-Za-z]{2,4}/#', '$1/en-US/', $real_url);
+        if (!preg_match('#klook\.com/en-US/#', $real_url)) {
+            $real_url = preg_replace('#(https?://(?:www\.)?klook\.com)/#', '$1/en-US/', $real_url);
+        }
+    }
+    // For destination URLs without tab suffix, add the activities tab
+    $base_listing = $real_url;
+    if (strpos($real_url, '/destination/') !== false && !preg_match('#/\d+-[a-z]#', $real_url)) {
+        $base_listing = trailingslashit($real_url) . ($type === 'hotel' ? '3-hotel/' : '1-things-to-do/');
+    }
+
+    $pool_target = max($limit * 3, 60);
+    $all_links   = array();
+
+    // Scan pages sequentially using the fast listing fetcher (no render=true for listing pages)
+    for ($page = 1; $page <= 12; $page++) {
+        $page_url = $page === 1 ? $base_listing : add_query_arg('page', $page, $base_listing);
+        $body     = self::fetch_klook_listing_html($page_url);
+        if (empty($body)) {
+            // Try without en-US locale on first page failure
+            if ($page === 1) {
+                $alt = preg_replace('#/en-US/#', '/', $page_url);
+                if ($alt !== $page_url) $body = self::fetch_klook_listing_html($alt);
+            }
+            if (empty($body)) break; // stop paginating on consecutive failures
+        }
+        $page_links = $type === 'hotel'
+            ? self::extract_hotel_links_from_html($body)
+            : self::extract_activity_links_from_html($body);
+        if (empty($page_links)) break; // no more results on this page
+        $all_links = array_merge($all_links, $page_links);
+        if (count(array_unique($all_links)) >= $pool_target) break;
+    }
+
+    // CDX fallback (Wayback Machine index) if direct scan yielded nothing
+    if (empty($all_links)) {
+        $city_slug_cdx = '';
+        if (preg_match('#/destination/c\d+-([a-z0-9-]+)#i', $real_url, $csm)) {
+            $city_slug_cdx = $csm[1];
+        } elseif ($city) {
+            $ct = get_term($city, 'travel_city');
+            if ($ct && !is_wp_error($ct)) $city_slug_cdx = $ct->slug;
+        }
+        if (!empty($city_slug_cdx)) {
+            $cdx = self::discover_klook_urls_via_cdx($type, $city_slug_cdx, $pool_target);
+            if (!empty($cdx)) $all_links = $cdx;
+        }
+    }
+    $all_links = array_values(array_unique($all_links));
+    // Filter already-imported
+    $already = self::get_imported_klook_ids($type);
+    $id_pattern = $type === 'hotel' ? '#/hotel/(\d+)-|/detail/(\d+)-#' : '#/activity/(\d+)-#';
+    $new_links = array();
+    foreach ($all_links as $lnk) {
+        if (preg_match($id_pattern, $lnk, $lm)) {
+            $kid = !empty($lm[1]) ? $lm[1] : (!empty($lm[2]) ? $lm[2] : '');
+            if ($kid && in_array($kid, $already, true)) continue;
+        }
+        $new_links[] = $lnk;
+    }
+    $new_links = array_slice($new_links, 0, $limit);
+    if (empty($new_links)) {
+        self::send_json_error_clean('No new URLs found to import. All discovered items are already in the database.');
+    }
+    self::send_json_success_clean(array(
+        'urls'    => $new_links,
+        'total'   => count($new_links),
+        'skipped' => count($all_links) - count($new_links),
+    ));
+}
+
+/**
+ * Import a single URL and return rich preview data for the live import log.
+ */
+public static function import_single_live() {
+    self::begin_import_request();
+    if (!check_ajax_referer('fth_import_publish', 'nonce', false)) {
+        self::send_json_error_clean('Security check failed');
+    }
+    if (!current_user_can('edit_posts')) {
+        self::send_json_error_clean('Unauthorized');
+    }
+    $url     = isset($_POST['url'])     ? esc_url_raw($_POST['url'])         : '';
+    $type    = isset($_POST['type'])    ? sanitize_text_field($_POST['type']) : 'activity';
+    $city    = isset($_POST['city'])    ? intval($_POST['city'])               : 0;
+    $country = isset($_POST['country']) ? intval($_POST['country'])            : 0;
+    $cat     = isset($_POST['category'])? intval($_POST['category'])           : 0;
+    if (empty($url)) {
+        self::send_json_error_clean('No URL provided');
+    }
+    $params = array(
+        'city'         => $city, 'country' => $country, 'category' => $cat,
+        'publish'      => 1,
+        'is_featured'  => !empty($_POST['is_featured'])  ? 1 : 0,
+        'is_bestseller'=> !empty($_POST['is_bestseller']) ? 1 : 0,
+    );
+    if ($type === 'hotel') {
+        $result = self::import_hotel($url, $params, self::build_affiliate_redirect($url));
+    } else {
+        $result = self::import_activity($url, $params, self::build_affiliate_redirect($url));
+    }
+    if (empty($result['success'])) {
+        self::send_json_error_clean(isset($result['message']) ? $result['message'] : 'Import failed');
+    }
+    $post_id = $result['data']['post_id'];
+    $post    = get_post($post_id);
+    $thumb   = get_the_post_thumbnail_url($post_id, 'thumbnail');
+    if (!$thumb) {
+        $ext = get_post_meta($post_id, '_fth_external_image', true);
+        $thumb = $ext ? Flavor_Travel_Hub::fth_img_url($ext) : '';
+    }
+    $price    = get_post_meta($post_id, '_fth_price', true);
+    $orig     = get_post_meta($post_id, '_fth_original_price', true);
+    $currency = get_post_meta($post_id, '_fth_currency', true) ?: 'USD';
+    $discount = '';
+    if ($price && $orig && (float) $orig > (float) $price) {
+        $discount = round((1 - (float)$price / (float)$orig) * 100) . '%';
+    }
+    self::send_json_success_clean(array(
+        'post_id'   => $post_id,
+        'title'     => $post ? $post->post_title : '',
+        'edit_url'  => get_edit_post_link($post_id, 'raw'),
+        'view_url'  => get_permalink($post_id),
+        'thumb'     => $thumb,
+        'price'     => $price,
+        'orig'      => $orig,
+        'currency'  => $currency,
+        'discount'  => $discount,
+    ));
+}
+
+/**
+ * Auto-populate AIOSEO SEO fields (title, description, keyphrases) for a post or term.
+ *
+ * Writes to the aioseo_posts / aioseo_terms table when AIOSEO 4.x is active,
+ * and also writes to post/term meta as a universal fallback.
+ *
+ * @param int    $object_id   Post ID or term ID.
+ * @param string $object_type 'post' | 'term'
+ * @param array  $seo         Keys: title, description, focus_keyphrase, keyphrases (array, up to 3)
+ */
+private static function save_aioseo_meta($object_id, $object_type, $seo) {
+    global $wpdb;
+
+    $seo_title       = isset($seo['title'])            ? (string) $seo['title']            : '';
+    $seo_desc        = isset($seo['description'])       ? (string) $seo['description']       : '';
+    $focus_kp        = isset($seo['focus_keyphrase'])   ? (string) $seo['focus_keyphrase']   : '';
+    $extra_kps       = isset($seo['keyphrases'])        ? (array)  $seo['keyphrases']        : array();
+
+    // Build AIOSEO keyphrases JSON
+    $keyphrases_obj = array(
+        'focus'  => array('keyphrase' => $focus_kp, 'score' => 0, 'analysis' => new stdClass()),
+        'extras' => array(),
+    );
+    foreach (array_slice($extra_kps, 0, 3) as $kp) {
+        $keyphrases_obj['extras'][] = array('keyphrase' => $kp, 'score' => 0);
+    }
+    $keyphrases_json = wp_json_encode($keyphrases_obj);
+
+    // Build keywords array JSON (legacy AIOSEO format)
+    $all_kps = array_merge(array($focus_kp), $extra_kps);
+    $keywords_arr = array();
+    foreach (array_filter($all_kps) as $k) {
+        $keywords_arr[] = array('value' => $k);
+    }
+    $keywords_json = wp_json_encode($keywords_arr);
+
+    if ($object_type === 'post') {
+        // ── AIOSEO 4.x: write to aioseo_posts table ──────────────────────────
+        $table = $wpdb->prefix . 'aioseo_posts';
+        if ($wpdb->get_var("SHOW TABLES LIKE '{$table}'") === $table) {
+            $now    = current_time('mysql');
+            $exists = $wpdb->get_var($wpdb->prepare("SELECT id FROM `{$table}` WHERE post_id = %d LIMIT 1", $object_id));
+            $row = array(
+                'title'       => $seo_title,
+                'description' => $seo_desc,
+                'keyphrases'  => $keyphrases_json,
+                'keywords'    => $keywords_json,
+                'updated'     => $now,
+            );
+            if ($exists) {
+                $wpdb->update($table, $row, array('post_id' => $object_id));
+            } else {
+                $row['post_id'] = $object_id;
+                $row['created'] = $now;
+                $wpdb->insert($table, $row);
+            }
+        }
+        // ── Fallback: post meta ───────────────────────────────────────────────
+        update_post_meta($object_id, '_aioseo_title',       $seo_title);
+        update_post_meta($object_id, '_aioseo_description', $seo_desc);
+        update_post_meta($object_id, '_aioseo_keyphrases',  $keyphrases_json);
+        update_post_meta($object_id, '_aioseo_keywords',    $keywords_json);
+
+    } elseif ($object_type === 'term') {
+        // ── AIOSEO 4.x: write to aioseo_terms table ──────────────────────────
+        $table = $wpdb->prefix . 'aioseo_terms';
+        if ($wpdb->get_var("SHOW TABLES LIKE '{$table}'") === $table) {
+            $now    = current_time('mysql');
+            $exists = $wpdb->get_var($wpdb->prepare("SELECT id FROM `{$table}` WHERE term_id = %d LIMIT 1", $object_id));
+            $row = array(
+                'title'       => $seo_title,
+                'description' => $seo_desc,
+                'keyphrases'  => $keyphrases_json,
+                'keywords'    => $keywords_json,
+                'updated'     => $now,
+            );
+            if ($exists) {
+                $wpdb->update($table, $row, array('term_id' => $object_id));
+            } else {
+                $row['term_id'] = $object_id;
+                $row['created'] = $now;
+                $wpdb->insert($table, $row);
+            }
+        }
+        // ── Fallback: term meta ───────────────────────────────────────────────
+        update_term_meta($object_id, '_aioseo_title',       $seo_title);
+        update_term_meta($object_id, '_aioseo_description', $seo_desc);
+        update_term_meta($object_id, '_aioseo_keyphrases',  $keyphrases_json);
+        update_term_meta($object_id, '_aioseo_keywords',    $keywords_json);
+    }
+}
+
+/**
+ * Build SEO data array for an activity post.
+ */
+private static function build_activity_seo($post_id, $data, $params) {
+    $title      = get_the_title($post_id);
+    $brand      = class_exists('Flavor_Travel_Hub') ? Flavor_Travel_Hub::get_brand_name() : 'Travel Hub';
+
+    // City / country names
+    $city_name    = '';
+    $country_name = '';
+    if (!empty($params['city'])) {
+        $city_t = get_term(intval($params['city']), 'travel_city');
+        if ($city_t && !is_wp_error($city_t)) $city_name = $city_t->name;
+    }
+    if (!empty($params['country'])) {
+        $ctry_t = get_term(intval($params['country']), 'travel_country');
+        if ($ctry_t && !is_wp_error($ctry_t)) $country_name = $ctry_t->name;
+    }
+
+    // Category name
+    $cat_name = '';
+    if (!empty($params['category'])) {
+        $cat_t = get_term(intval($params['category']), 'travel_category');
+        if ($cat_t && !is_wp_error($cat_t)) $cat_name = $cat_t->name;
+    }
+
+    $location = $city_name ?: $country_name;
+
+    // SEO title: "Activity Name in City – Book Online | Brand"
+    $seo_title = $location
+        ? "{$title} in {$location} – Book Online | {$brand}"
+        : "{$title} – Book Online | {$brand}";
+    // Clamp to 60 chars title portion
+    if (mb_strlen($seo_title) > 65) {
+        $short = mb_substr($title, 0, 38);
+        $seo_title = $location ? "{$short}... in {$location} | {$brand}" : "{$short}... | {$brand}";
+    }
+
+    // Meta description: first 155 chars of description or a generated sentence
+    $raw_desc = !empty($data['description']) ? wp_strip_all_tags($data['description']) : '';
+    $raw_desc = preg_replace('/\s+/', ' ', trim($raw_desc));
+    if (mb_strlen($raw_desc) > 155) {
+        $raw_desc = mb_substr($raw_desc, 0, 152) . '...';
+    }
+    if (empty($raw_desc) && $location) {
+        $raw_desc = "Discover {$title} in {$location}. Book online today and enjoy the best experiences.";
+    } elseif (empty($raw_desc)) {
+        $raw_desc = "Book {$title} online. Explore the best activities and tours.";
+    }
+
+    // Price string for keyphrases
+    $price_kp = (!empty($data['price']) && !empty($data['currency'])) ? "{$data['currency']}{$data['price']}" : '';
+
+    // Focus keyphrase: "{city} {simplified title word}"
+    $title_words = explode(' ', strtolower($title));
+    $title_kw    = implode(' ', array_slice($title_words, 0, 3));
+    $focus_kp    = $location ? strtolower($location) . ' ' . $title_kw : $title_kw;
+
+    // Extra keyphrases
+    $extras = array();
+    if ($location) {
+        $extras[] = 'things to do in ' . strtolower($location);
+        $extras[] = strtolower($location) . ' tours and activities';
+    }
+    if ($cat_name) $extras[] = strtolower($cat_name) . ' ' . ($location ? 'in ' . strtolower($location) : '');
+    if ($price_kp)  $extras[] = $title_kw . ' ' . $price_kp;
+    $extras = array_filter(array_slice($extras, 0, 3));
+
+    return array(
+        'title'           => $seo_title,
+        'description'     => $raw_desc,
+        'focus_keyphrase' => trim($focus_kp),
+        'keyphrases'      => array_values($extras),
+    );
+}
+
+/**
+ * Build SEO data array for a hotel post.
+ */
+private static function build_hotel_seo($post_id, $data, $params) {
+    $title  = get_the_title($post_id);
+    $brand  = class_exists('Flavor_Travel_Hub') ? Flavor_Travel_Hub::get_brand_name() : 'Travel Hub';
+
+    $city_name    = '';
+    $country_name = '';
+    if (!empty($params['city'])) {
+        $city_t = get_term(intval($params['city']), 'travel_city');
+        if ($city_t && !is_wp_error($city_t)) $city_name = $city_t->name;
+    }
+    if (!empty($params['country'])) {
+        $ctry_t = get_term(intval($params['country']), 'travel_country');
+        if ($ctry_t && !is_wp_error($ctry_t)) $country_name = $ctry_t->name;
+    }
+
+    $location = $city_name ?: $country_name;
+    $stars    = !empty($data['stars']) ? (int) $data['stars'] : 0;
+    $stars_str = $stars > 0 ? "{$stars}-star " : '';
+
+    $seo_title = $location
+        ? "{$title} – {$stars_str}Hotel in {$location} | {$brand}"
+        : "{$title} – {$stars_str}Hotel | {$brand}";
+    if (mb_strlen($seo_title) > 65) {
+        $short = mb_substr($title, 0, 38);
+        $seo_title = $location ? "{$short}... – Hotel in {$location} | {$brand}" : "{$short}... | {$brand}";
+    }
+
+    $raw_desc = !empty($data['description']) ? wp_strip_all_tags($data['description']) : '';
+    $raw_desc = preg_replace('/\s+/', ' ', trim($raw_desc));
+    if (mb_strlen($raw_desc) > 155) $raw_desc = mb_substr($raw_desc, 0, 152) . '...';
+    if (empty($raw_desc) && $location) {
+        $raw_desc = "Stay at {$title} in {$location}. Find the best rates and book your room online today.";
+    } elseif (empty($raw_desc)) {
+        $raw_desc = "Book {$title} online. Enjoy comfort, great amenities and the best hotel deals.";
+    }
+
+    $focus_kp = $location
+        ? strtolower($title) . ' ' . strtolower($location)
+        : strtolower($title) . ' hotel';
+
+    $extras = array();
+    if ($location) {
+        $extras[] = 'hotels in ' . strtolower($location);
+        $extras[] = strtolower($location) . ' accommodation';
+    }
+    if ($stars > 0 && $location) $extras[] = $stars . ' star hotel ' . strtolower($location);
+    $extras = array_filter(array_slice($extras, 0, 3));
+
+    return array(
+        'title'           => $seo_title,
+        'description'     => $raw_desc,
+        'focus_keyphrase' => trim($focus_kp),
+        'keyphrases'      => array_values($extras),
+    );
+}
+
+/**
+ * Build SEO data for a taxonomy term (city, country, category).
+ */
+private static function build_term_seo($term, $taxonomy) {
+    $brand = class_exists('Flavor_Travel_Hub') ? Flavor_Travel_Hub::get_brand_name() : 'Travel Hub';
+    $name  = $term->name;
+
+    if ($taxonomy === 'travel_city') {
+        return array(
+            'title'           => "Things to Do in {$name} – Tours & Attractions | {$brand}",
+            'description'     => "Discover the best things to do in {$name}. Browse top-rated tours, activities and attractions. Book online for the best prices.",
+            'focus_keyphrase' => "things to do in " . strtolower($name),
+            'keyphrases'      => array(
+                strtolower($name) . ' tours',
+                strtolower($name) . ' activities',
+                'best ' . strtolower($name) . ' attractions',
+            ),
+        );
+    }
+    if ($taxonomy === 'travel_country') {
+        return array(
+            'title'           => "Travel to {$name} – Top Destinations & Experiences | {$brand}",
+            'description'     => "Plan your trip to {$name}. Find the best tours, hotels and activities across top cities. Book with {$brand} for exclusive deals.",
+            'focus_keyphrase' => strtolower($name) . ' travel guide',
+            'keyphrases'      => array(
+                'things to do in ' . strtolower($name),
+                strtolower($name) . ' tours',
+                strtolower($name) . ' travel tips',
+            ),
+        );
+    }
+    if ($taxonomy === 'travel_category') {
+        return array(
+            'title'           => "{$name} Tours & Activities – Book Online | {$brand}",
+            'description'     => "Browse the best {$name} tours and activities. Compare prices, read reviews and book online instantly with {$brand}.",
+            'focus_keyphrase' => strtolower($name) . ' tours',
+            'keyphrases'      => array(
+                strtolower($name) . ' activities',
+                'book ' . strtolower($name) . ' online',
+                'best ' . strtolower($name) . ' experiences',
+            ),
+        );
+    }
+    // Generic
+    return array(
+        'title'           => "{$name} | {$brand}",
+        'description'     => "Explore {$name} with {$brand}. Find top activities, tours and hotels.",
+        'focus_keyphrase' => strtolower($name),
+        'keyphrases'      => array(),
+    );
+}
+
+/**
+ * Return an array of already-imported Klook IDs for a given type (activity/hotel).
+ * Uses a direct DB query for performance — avoids loading all post objects.
+ */
+private static function get_imported_klook_ids($type) {
+    global $wpdb;
+    $meta_key  = ($type === 'hotel') ? '_fth_klook_hotel_id'    : '_fth_klook_activity_id';
+    $post_type = ($type === 'hotel') ? 'travel_hotel'           : 'travel_activity';
+    $ids = $wpdb->get_col($wpdb->prepare(
+        "SELECT pm.meta_value
+         FROM {$wpdb->postmeta} pm
+         INNER JOIN {$wpdb->posts} p ON p.ID = pm.post_id
+         WHERE pm.meta_key = %s
+           AND p.post_type = %s
+           AND p.post_status != 'trash'",
+        $meta_key, $post_type
+    ));
+    return array_filter($ids);
 }
 
 public static function import_bulk_city() {
@@ -1059,18 +1700,22 @@ public static function import_bulk_city() {
             $candidate_urls[] = trailingslashit($real_url) . '1-things-to-do/';
             $candidate_urls[] = trailingslashit($real_url) . '2-tours/';
         }
+        // Expand pages further so we have a large pool to pick new activities from.
+        // We fetch up to 12 pages per URL — at ~20-30 activities per page that gives
+        // 240–360 candidates. After filtering out already-imported ones we take $limit.
         $expanded = array();
         foreach (array_unique($candidate_urls) as $candidate_url) {
             $expanded[] = $candidate_url;
-            for ($page = 2; $page <= 6; $page++) {
+            for ($page = 2; $page <= 12; $page++) {
                 $expanded[] = add_query_arg('page', $page, $candidate_url);
             }
         }
 
-        $links = array();
-        $notes = array();
+        $links      = array();
+        $notes      = array();
+        $pool_target = max($limit * 4, 200); // collect a wide pool before filtering
         foreach (array_unique($expanded) as $candidate_url) {
-            // Use full fallback chain: direct → no-locale → WB CDX → WB availability
+            // Use full fallback chain: direct → no-locale → ScraperAPI → WB CDX → WB avail
             $fetch = self::fetch_klook_html($candidate_url);
             $body  = $fetch['body'];
             if (empty($body)) {
@@ -1088,7 +1733,7 @@ public static function import_bulk_city() {
             if (!empty($found)) {
                 $links = array_merge($links, $found);
             }
-            if (count($links) >= $limit) break;
+            if (count(array_unique($links)) >= $pool_target) break;
         }
 
         // CDX fallback: if listing pages gave nothing, discover activity URLs directly
@@ -1102,7 +1747,7 @@ public static function import_bulk_city() {
                 if ($ct && !is_wp_error($ct)) $city_slug_cdx = $ct->slug;
             }
             if (!empty($city_slug_cdx)) {
-                $cdx_urls = self::discover_klook_urls_via_cdx('activity', $city_slug_cdx, $limit);
+                $cdx_urls = self::discover_klook_urls_via_cdx('activity', $city_slug_cdx, $pool_target);
                 if (!empty($cdx_urls)) {
                     $links = $cdx_urls;
                     $notes[] = 'Wayback CDX: found ' . count($cdx_urls) . ' activity URLs for "' . $city_slug_cdx . '"';
@@ -1114,7 +1759,27 @@ public static function import_bulk_city() {
         if (empty($links)) {
             self::send_json_error_clean('No activity links found. ' . implode(' | ', array_slice($notes, 0, 5)) . ' Tip: Try a URL like https://www.klook.com/en-US/destination/c78-dubai/');
         }
-        $links = array_slice($links, 0, $limit);
+
+        // Filter out already-imported activities — so each run picks up NEW content.
+        $already_imported_ids = self::get_imported_klook_ids('activity');
+        $skipped_count        = 0;
+        $new_links            = array();
+        foreach ($links as $lnk) {
+            if (preg_match('#/activity/(\d+)-#', $lnk, $lm)) {
+                if (in_array($lm[1], $already_imported_ids, true)) {
+                    $skipped_count++;
+                    continue; // already in DB — skip
+                }
+            }
+            $new_links[] = $lnk;
+        }
+        $links = array_slice($new_links, 0, $limit);
+        if (empty($links)) {
+            self::send_json_error_clean(
+                'All ' . ($skipped_count) . ' found activities are already imported. ' .
+                'Try a different page or import from another destination URL to get new content.'
+            );
+        }
 
         $imported = 0;
         $checked  = 0;
@@ -1123,7 +1788,7 @@ public static function import_bulk_city() {
         foreach ($links as $activity_url) {
             // Stop after 240 seconds to avoid PHP timeout
             if ((time() - $start) > 240) {
-                $errors[] = 'Time limit reached – ' . (count($links) - $checked) . ' URLs not processed yet. Run again to continue.';
+                $errors[] = 'Time limit reached – ' . (count($links) - $checked) . ' URLs not processed yet. Run import again to continue.';
                 break;
             }
             $checked++;
@@ -1142,13 +1807,14 @@ public static function import_bulk_city() {
             }
         }
 
-        $message = 'Imported ' . $imported . ' activities out of ' . $checked . ' links found.';
+        $message = 'Imported ' . $imported . ' new activities (skipped ' . $skipped_count . ' already imported).';
         if (!empty($errors)) {
-            $message .= ' Notes: ' . implode(' | ', array_slice($errors, 0, 3));
+            $message .= ' Errors: ' . implode(' | ', array_slice($errors, 0, 3));
         }
         self::send_json_success_clean(array(
             'imported' => $imported,
             'checked'  => $checked,
+            'skipped'  => $skipped_count,
             'message'  => $message,
         ));
     } catch (Throwable $e) {
@@ -1362,38 +2028,130 @@ public static function import_bulk_city() {
             update_post_meta($post_id, '_fth_is_bestseller', '1');
         }
         
-        // Taxonomies
+        // Taxonomies — reuse the already-sideloaded thumbnail as hero image for city/country
+        $thumb_id = get_post_thumbnail_id($post_id);
         if (!empty($params['city'])) {
             wp_set_object_terms($post_id, intval($params['city']), 'travel_city');
-            // Auto-generate hero image for city if missing
             $city_id = intval($params['city']);
-            if (!get_term_meta($city_id, 'fth_hero_image', true) && class_exists('Flavor_Travel_Hub')) {
+            if (!get_term_meta($city_id, 'fth_hero_image', true)) {
                 $city_t = get_term($city_id, 'travel_city');
                 if ($city_t && !is_wp_error($city_t)) {
-                    Flavor_Travel_Hub::generate_taxonomy_image($city_t->name, $city_id, 'travel_city');
+                    if ($thumb_id) {
+                        // Use the real Klook photo (already downloaded to WP media)
+                        update_term_meta($city_id, 'fth_hero_image', wp_get_attachment_url($thumb_id));
+                        update_term_meta($city_id, 'fth_hero_image_id', $thumb_id);
+                    } elseif (!empty($data['image'])) {
+                        // Store external URL as fallback (proxy will display it)
+                        update_term_meta($city_id, 'fth_hero_image', esc_url_raw($data['image']));
+                    } elseif (class_exists('Flavor_Travel_Hub')) {
+                        Flavor_Travel_Hub::generate_taxonomy_image($city_t->name, $city_id, 'travel_city');
+                    }
                 }
             }
         }
         if (!empty($params['country'])) {
             wp_set_object_terms($post_id, intval($params['country']), 'travel_country');
-            // Auto-generate hero image for country if missing
             $country_id = intval($params['country']);
-            if (!get_term_meta($country_id, 'fth_hero_image', true) && class_exists('Flavor_Travel_Hub')) {
+            if (!get_term_meta($country_id, 'fth_hero_image', true)) {
                 $country_t = get_term($country_id, 'travel_country');
                 if ($country_t && !is_wp_error($country_t)) {
-                    Flavor_Travel_Hub::generate_taxonomy_image($country_t->name, $country_id, 'travel_country');
+                    if ($thumb_id) {
+                        update_term_meta($country_id, 'fth_hero_image', wp_get_attachment_url($thumb_id));
+                        update_term_meta($country_id, 'fth_hero_image_id', $thumb_id);
+                    } elseif (!empty($data['image'])) {
+                        update_term_meta($country_id, 'fth_hero_image', esc_url_raw($data['image']));
+                    } elseif (class_exists('Flavor_Travel_Hub')) {
+                        Flavor_Travel_Hub::generate_taxonomy_image($country_t->name, $country_id, 'travel_country');
+                    }
                 }
             }
         }
+        // ── Auto-generate city FAQ on first import ───────────────────────────
+        if (!empty($params['city'])) {
+            $city_faq_id = intval($params['city']);
+            if (!get_term_meta($city_faq_id, '_fth_faq', true)) {
+                $ct_obj  = get_term($city_faq_id, 'travel_city');
+                $co_obj  = (!empty($params['country'])) ? get_term(intval($params['country']), 'travel_country') : null;
+                if ($ct_obj && !is_wp_error($ct_obj)) {
+                    $cn = $ct_obj->name;
+                    $co = ($co_obj && !is_wp_error($co_obj)) ? $co_obj->name : '';
+                    $city_faqs = array(
+                        "Q: What are the best things to do in {$cn}?\nA: {$cn} offers a wide variety of activities including cultural experiences, outdoor adventures, guided tours, and family-friendly excursions. Browse our curated list of top-rated experiences.",
+                        "Q: When is the best time to visit {$cn}?\nA: The best time to visit {$cn} depends on your preferences. Check local weather guides and book activities in advance for the best availability and prices.",
+                        "Q: How do I book activities in {$cn}?\nA: Browse and book all activities directly on this page. Clicking any activity takes you to the secure Klook booking page for instant confirmation.",
+                        "Q: Are the prices for {$cn} activities up to date?\nA: Yes, prices are updated regularly and reflect current Klook rates including any available promotions and discounts.",
+                        "Q: Do I need to pre-book activities in {$cn}?\nA: Pre-booking is highly recommended for popular activities. Many experiences sell out quickly, especially during peak season.",
+                    );
+                    if ($co) {
+                        $city_faqs[] = "Q: Do I need a visa to visit {$cn}, {$co}?\nA: Visa requirements vary by nationality. Always check with your local embassy or official government travel advisories before your trip to {$co}.";
+                    }
+                    update_term_meta($city_faq_id, '_fth_faq', implode("\n\n", $city_faqs));
+                }
+            }
+        }
+        // ── Auto-generate country FAQ on first import ────────────────────────
+        if (!empty($params['country'])) {
+            $cntry_faq_id = intval($params['country']);
+            if (!get_term_meta($cntry_faq_id, '_fth_faq', true)) {
+                $co_obj = get_term($cntry_faq_id, 'travel_country');
+                if ($co_obj && !is_wp_error($co_obj)) {
+                    $co = $co_obj->name;
+                    $country_faqs = array(
+                        "Q: What are the top tourist destinations in {$co}?\nA: {$co} is home to many incredible destinations. Explore our curated activities and tours in each city for an unforgettable experience.",
+                        "Q: What is the currency used in {$co}?\nA: Currency information varies by region. We recommend checking the latest exchange rates and accepted payment methods before your trip.",
+                        "Q: How do I get around in {$co}?\nA: Transportation options vary by region. Many activities include transfers; check each listing for included transport details.",
+                        "Q: Are activities in {$co} suitable for families?\nA: Yes, many activities in {$co} are family-friendly. Each listing clearly indicates the recommended age group and suitability.",
+                        "Q: What languages are spoken in {$co}?\nA: Official and commonly spoken languages vary across {$co}. Activity guides are generally available in multiple languages for international visitors.",
+                    );
+                    update_term_meta($cntry_faq_id, '_fth_faq', implode("\n\n", $country_faqs));
+                }
+            }
+        }
+
+        // Auto-detect category from Klook data if not manually selected
+        if (empty($params['category']) && !empty($data['klook_categories'])) {
+            foreach ($data['klook_categories'] as $cat_name) {
+                $cat_name = sanitize_text_field(trim($cat_name));
+                if (empty($cat_name)) continue;
+                // Find existing term by name or slug
+                $existing = get_term_by('name', $cat_name, 'travel_category');
+                if (!$existing) {
+                    $existing = get_term_by('slug', sanitize_title($cat_name), 'travel_category');
+                }
+                if ($existing && !is_wp_error($existing)) {
+                    $params['category'] = $existing->term_id;
+                    // Backfill icon if not yet set
+                    if (!get_term_meta($existing->term_id, 'fth_icon', true) && class_exists('FTH_Templates')) {
+                        update_term_meta($existing->term_id, 'fth_icon', FTH_Templates::get_category_emoji($cat_name));
+                    }
+                } else {
+                    $new_term = wp_insert_term($cat_name, 'travel_category', array('slug' => sanitize_title($cat_name)));
+                    if (!is_wp_error($new_term)) {
+                        $params['category'] = $new_term['term_id'];
+                        // Auto-assign emoji icon for the new category
+                        if (class_exists('FTH_Templates')) {
+                            update_term_meta($new_term['term_id'], 'fth_icon', FTH_Templates::get_category_emoji($cat_name));
+                        }
+                        self::generate_category_seo_meta($new_term['term_id']);
+                    }
+                }
+                if (!empty($params['category'])) break;
+            }
+        }
+
         if (!empty($params['category'])) {
             wp_set_object_terms($post_id, intval($params['category']), 'travel_category');
+            self::generate_category_seo_meta(intval($params['category']));
+        }
+        if (!empty($params['country'])) {
+            self::generate_country_seo_meta(intval($params['country']));
         }
 
         // Generate SEO (AIO SEO)
         self::generate_activity_seo_meta($post_id, get_post($post_id));
         if (class_exists('FTH_AIOSEO_Integration')) { FTH_AIOSEO_Integration::auto_fill_activity_seo($post_id, get_post($post_id)); }
         update_option('fth_needs_flush', true);
-        
+
         return array(
             'success' => true,
             'data'    => array(
@@ -1612,11 +2370,45 @@ public static function import_bulk_city() {
                 }
             }
 
+            // Expand hotel pages further for a bigger pool
+            for ($page = 9; $page <= 16; $page++) {
+                $candidate_urls[] = add_query_arg('page', $page, $real_url);
+            }
+            foreach (array_unique(array_slice($candidate_urls, 8)) as $candidate_url) {
+                if (count(array_unique($links)) >= $limit * 4) break;
+                $fetch = self::fetch_klook_html($candidate_url);
+                $body  = $fetch['body'];
+                if (!$body) continue;
+                $links       = array_merge($links, self::extract_hotel_links_from_html($body));
+                $listing_map = array_merge($listing_map, self::extract_hotel_listing_items_from_html($body));
+            }
+
             $links = array_values(array_unique($links));
             if (empty($links)) {
                 self::send_json_error_clean('No hotel links found. ' . implode(' | ', array_slice($notes, 0, 5)));
             }
-            $links = array_slice($links, 0, $limit);
+
+            // Filter already-imported hotels so each run adds NEW content
+            $already_imported_hotel_ids = self::get_imported_klook_ids('hotel');
+            $skipped_hotels = 0;
+            $new_links      = array();
+            foreach ($links as $lnk) {
+                if (preg_match('#/hotel/(\d+)-|/detail/(\d+)-#', $lnk, $lm)) {
+                    $hid = !empty($lm[1]) ? $lm[1] : $lm[2];
+                    if (in_array($hid, $already_imported_hotel_ids, true)) {
+                        $skipped_hotels++;
+                        continue;
+                    }
+                }
+                $new_links[] = $lnk;
+            }
+            $links = array_slice($new_links, 0, $limit);
+            if (empty($links)) {
+                self::send_json_error_clean(
+                    'All ' . $skipped_hotels . ' found hotels are already imported. Run the import again with the next page or a different URL.'
+                );
+            }
+
             $imported = 0; $checked = 0; $errors = array(); $stopped_early = false;
             foreach ($links as $hotel_url) {
                 if ((time() - $start) > 240) {
@@ -1628,12 +2420,12 @@ public static function import_bulk_city() {
                 $result = self::import_hotel($hotel_url, array('city'=>$city,'country'=>$country,'publish'=>1,'listing_fallback'=>$fallback), self::build_affiliate_redirect($hotel_url));
                 if (!empty($result['success'])) { $imported++; } else { $errors[] = !empty($result['message']) ? $result['message'] : 'Unknown import error'; }
             }
-            $message = 'Imported ' . $imported . ' hotels out of ' . $checked . ' links checked.';
+            $message = 'Imported ' . $imported . ' new hotels (skipped ' . $skipped_hotels . ' already imported).';
             if ($stopped_early) {
-                $message .= ' The run stopped early to avoid a server timeout. Run the same import again to continue.';
+                $message .= ' Run again to continue importing more.';
             }
-            if (!empty($errors)) { $message .= ' Some skipped: ' . implode(' | ', array_slice($errors, 0, 5)); }
-            self::send_json_success_clean(array('imported'=>$imported,'checked'=>$checked,'message'=>$message));
+            if (!empty($errors)) { $message .= ' Some errors: ' . implode(' | ', array_slice($errors, 0, 5)); }
+            self::send_json_success_clean(array('imported'=>$imported,'checked'=>$checked,'skipped'=>$skipped_hotels,'message'=>$message));
         } catch (Throwable $e) {
             self::send_json_error_clean('Hotel import failed: ' . $e->getMessage());
         }
@@ -1716,21 +2508,43 @@ public static function import_bulk_city() {
         if (!empty($data['inclusions'])) update_post_meta($post_id, '_fth_inclusions', $data['inclusions']);
         if (!empty($data['faq']))        update_post_meta($post_id, '_fth_faq', $data['faq']);
         self::import_post_images($post_id, !empty($data['image']) ? $data['image'] : '', !empty($data['images']) && is_array($data['images']) ? $data['images'] : array());
+        $thumb_id = get_post_thumbnail_id($post_id);
         if (!empty($params['city'])) {
             wp_set_object_terms($post_id, intval($params['city']), 'travel_city');
             $city_id = intval($params['city']);
-            if (!get_term_meta($city_id, 'fth_hero_image', true) && class_exists('Flavor_Travel_Hub')) {
+            if (!get_term_meta($city_id, 'fth_hero_image', true)) {
                 $city_t = get_term($city_id, 'travel_city');
-                if ($city_t && !is_wp_error($city_t)) { Flavor_Travel_Hub::generate_taxonomy_image($city_t->name, $city_id, 'travel_city'); }
+                if ($city_t && !is_wp_error($city_t)) {
+                    if ($thumb_id) {
+                        update_term_meta($city_id, 'fth_hero_image', wp_get_attachment_url($thumb_id));
+                        update_term_meta($city_id, 'fth_hero_image_id', $thumb_id);
+                    } elseif (!empty($data['image'])) {
+                        update_term_meta($city_id, 'fth_hero_image', esc_url_raw($data['image']));
+                    } elseif (class_exists('Flavor_Travel_Hub')) {
+                        Flavor_Travel_Hub::generate_taxonomy_image($city_t->name, $city_id, 'travel_city');
+                    }
+                }
             }
         }
         if (!empty($params['country'])) {
             wp_set_object_terms($post_id, intval($params['country']), 'travel_country');
             $country_id = intval($params['country']);
-            if (!get_term_meta($country_id, 'fth_hero_image', true) && class_exists('Flavor_Travel_Hub')) {
+            if (!get_term_meta($country_id, 'fth_hero_image', true)) {
                 $country_t = get_term($country_id, 'travel_country');
-                if ($country_t && !is_wp_error($country_t)) { Flavor_Travel_Hub::generate_taxonomy_image($country_t->name, $country_id, 'travel_country'); }
+                if ($country_t && !is_wp_error($country_t)) {
+                    if ($thumb_id) {
+                        update_term_meta($country_id, 'fth_hero_image', wp_get_attachment_url($thumb_id));
+                        update_term_meta($country_id, 'fth_hero_image_id', $thumb_id);
+                    } elseif (!empty($data['image'])) {
+                        update_term_meta($country_id, 'fth_hero_image', esc_url_raw($data['image']));
+                    } elseif (class_exists('Flavor_Travel_Hub')) {
+                        Flavor_Travel_Hub::generate_taxonomy_image($country_t->name, $country_id, 'travel_country');
+                    }
+                }
             }
+        }
+        if (!empty($params['country'])) {
+            self::generate_country_seo_meta(intval($params['country']));
         }
         self::generate_hotel_seo_meta($post_id, get_post($post_id));
         if (class_exists('FTH_AIOSEO_Integration')) { FTH_AIOSEO_Integration::auto_fill_hotel_seo($post_id, get_post($post_id)); }
@@ -1807,8 +2621,21 @@ public static function import_bulk_city() {
                 }
             }
         }
-        if (preg_match('/<script[^>]*id=["\']__NEXT_DATA__["\'][^>]*>(.*?)<\/script>/si', $html, $m)) {
-            $next = json_decode(html_entity_decode(trim($m[1]), ENT_QUOTES, 'UTF-8'), true);
+        // Use strpos/substr to avoid pcre.backtrack_limit failures on large Klook JSON
+        $htl_nd_raw = '';
+        foreach (array('id="__NEXT_DATA__"', "id='__NEXT_DATA__'", 'id="__NEXT_DATA__" ', "id='__NEXT_DATA__' ") as $_htl_nd_marker) {
+            $_htl_nd_pos = strpos($html, $_htl_nd_marker);
+            if ($_htl_nd_pos !== false) {
+                $_htl_nd_gt  = strpos($html, '>', $_htl_nd_pos);
+                $_htl_nd_end = $_htl_nd_gt !== false ? strpos($html, '</script>', $_htl_nd_gt + 1) : false;
+                if ($_htl_nd_gt !== false && $_htl_nd_end !== false) {
+                    $htl_nd_raw = substr($html, $_htl_nd_gt + 1, $_htl_nd_end - $_htl_nd_gt - 1);
+                }
+                break;
+            }
+        }
+        if ($htl_nd_raw !== '') {
+            $next = json_decode(html_entity_decode(trim($htl_nd_raw), ENT_QUOTES, 'UTF-8'), true);
             if (is_array($next)) {
                 $props = isset($next['props']['pageProps']) ? $next['props']['pageProps'] : $next;
                 $title = self::normalize_front_title(self::array_find_first($props, array('seoTitle','hotelName','name','title','hotel_title')), $url);
@@ -1847,7 +2674,10 @@ public static function import_bulk_city() {
                 if ($amen !== '') {
                     $data['amenities'] = self::bullet_lines($amen, 16);
                 }
-                $images = self::array_collect_values($props, array('image','imageUrl','coverImageUrl','originalUrl'));
+                $images = self::array_collect_values($props, array(
+                    'image','imageUrl','coverImageUrl','originalUrl','imgUrl','large','original',
+                    'coverImages','images','gallery','photos','imageList','htlImages','hotelImages',
+                ));
                 $clean = self::clean_image_urls($images, 10);
                 if (!empty($clean)) {
                     $data['images'] = array_values(array_unique(array_merge($data['images'], $clean)));
@@ -1946,110 +2776,275 @@ public static function import_bulk_city() {
      * Generate AIO SEO meta for hotel
      */
     private static function generate_hotel_seo_meta($post_id, $post) {
-        $title = $post->post_title;
-        $cities = wp_get_post_terms($post_id, 'travel_city');
-        $countries = wp_get_post_terms($post_id, 'travel_country');
-        $city_name = !empty($cities) ? $cities[0]->name : '';
+        global $wpdb;
+        $title        = $post->post_title;
+        $brand        = class_exists('Flavor_Travel_Hub') ? Flavor_Travel_Hub::get_brand_name() : 'Travel Hub';
+        $cities       = wp_get_post_terms($post_id, 'travel_city');
+        $countries    = wp_get_post_terms($post_id, 'travel_country');
+        $city_name    = !empty($cities)    ? $cities[0]->name    : '';
         $country_name = !empty($countries) ? $countries[0]->name : '';
-        $seo_title = trim($title . ($city_name ? ' - ' . $city_name : '') . ($country_name ? ' - ' . $country_name : ''));
-        $seo_description = $post->post_excerpt ?: ('Book ' . $title . ($city_name ? ' in ' . $city_name : '') . '. View rooms, location details, facilities and current hotel information.');
-        update_post_meta($post_id, '_aioseo_title', $seo_title);
-        update_post_meta($post_id, '_aioseo_description', $seo_description);
-        update_post_meta($post_id, '_aioseo_og_title', $seo_title);
-        update_post_meta($post_id, '_aioseo_og_description', $seo_description);
-        $keywords = array_values(array_filter(array_unique(array(
-            strtolower(trim($title)),
-            $city_name ? strtolower(trim($city_name . ' hotels')) : '',
-            $country_name ? strtolower(trim($country_name . ' hotels')) : 'hotel deals',
-            strtolower(trim($title . ' rooms')),
-        ))));
-        $focus = !empty($keywords) ? array_shift($keywords) : strtolower(trim($title));
-        update_post_meta($post_id, '_aioseo_keyphrases', wp_json_encode(array(
-            'focus' => array('keyphrase' => $focus),
-            'additional' => array_map(function($kw){ return array('keyphrase' => $kw); }, array_slice($keywords, 0, 3))
+        $location     = $city_name ?: $country_name;
+
+        $seo_title = $location
+            ? "{$title} – Hotel in {$location} | {$brand}"
+            : "{$title} – Hotel | {$brand}";
+        if (mb_strlen($seo_title) > 65) {
+            $seo_title = $location ? mb_substr($title, 0, 35) . "... – {$location} | {$brand}" : mb_substr($title, 0, 50) . " | {$brand}";
+        }
+
+        $seo_description = $post->post_excerpt
+            ?: 'Book ' . $title . ($location ? ' in ' . $location : '') . '. View rooms, location, facilities, prices and availability. Best rates guaranteed.';
+        if (mb_strlen($seo_description) > 155) $seo_description = mb_substr($seo_description, 0, 152) . '...';
+
+        $focus_kp = $location ? strtolower($title) . ' ' . strtolower($location) : strtolower($title) . ' hotel';
+        $extras   = array_values(array_filter(array(
+            $location ? 'hotels in ' . strtolower($location)        : '',
+            $location ? strtolower($location) . ' accommodation'    : '',
+            $location ? strtolower($title) . ' ' . strtolower($location) . ' price' : strtolower($title) . ' booking',
         )));
+
+        // ── post meta (used by AIOSEO 3.x / Yoast / fallback) ────────────────
+        update_post_meta($post_id, '_aioseo_title',              $seo_title);
+        update_post_meta($post_id, '_aioseo_description',        $seo_description);
+        update_post_meta($post_id, '_aioseo_og_title',           $seo_title);
+        update_post_meta($post_id, '_aioseo_og_description',     $seo_description);
+        $kp_json = wp_json_encode(array(
+            'focus'      => array('keyphrase' => $focus_kp, 'score' => 0, 'analysis' => new stdClass()),
+            'extras'     => array_map(function($k){ return array('keyphrase'=>$k,'score'=>0); }, array_slice($extras,0,3)),
+        ));
+        update_post_meta($post_id, '_aioseo_keyphrases', $kp_json);
+        update_post_meta($post_id, '_aioseo_keywords', wp_json_encode(
+            array_map(function($k){ return array('value'=>$k); }, array_filter(array_merge(array($focus_kp), $extras)))
+        ));
+
+        // ── AIOSEO 4.x table ─────────────────────────────────────────────────
+        $table = $wpdb->prefix . 'aioseo_posts';
+        if ($wpdb->get_var("SHOW TABLES LIKE '{$table}'") === $table) {
+            $now    = current_time('mysql');
+            $exists = $wpdb->get_var($wpdb->prepare("SELECT id FROM `{$table}` WHERE post_id = %d LIMIT 1", $post_id));
+            $row = array('title' => $seo_title, 'description' => $seo_description, 'keyphrases' => $kp_json, 'updated' => $now);
+            if ($exists) {
+                $wpdb->update($table, $row, array('post_id' => $post_id));
+            } else {
+                $wpdb->insert($table, array_merge($row, array('post_id' => $post_id, 'created' => $now)));
+            }
+        }
     }
 
     /**
      * Generate AIO SEO meta for activity
      */
     private static function generate_activity_seo_meta($post_id, $post) {
-        $title = $post->post_title;
-        $cities = wp_get_post_terms($post_id, 'travel_city');
+        global $wpdb;
+        $title     = $post->post_title;
+        $brand     = class_exists('Flavor_Travel_Hub') ? Flavor_Travel_Hub::get_brand_name() : 'Travel Hub';
+        $cities    = wp_get_post_terms($post_id, 'travel_city');
+        $cats      = wp_get_post_terms($post_id, 'travel_category');
         $city_name = !empty($cities) ? $cities[0]->name : '';
-        
-        $seo_title = $title;
-        if ($city_name) {
-            $seo_title .= ' in ' . $city_name;
+        $cat_name  = !empty($cats)   ? $cats[0]->name   : '';
+
+        $seo_title = $city_name
+            ? "{$title} in {$city_name} – Book Online | {$brand}"
+            : "{$title} – Book Online | {$brand}";
+        if (mb_strlen($seo_title) > 65) {
+            $seo_title = $city_name
+                ? mb_substr($title, 0, 35) . "... in {$city_name} | {$brand}"
+                : mb_substr($title, 0, 50) . " | {$brand}";
         }
-        $seo_title .= ' | Tickets';
-        
-        $seo_description = $post->post_excerpt ?: wp_trim_words(strip_tags($post->post_content), 25);
-        if (empty($seo_description)) {
+
+        $seo_description = $post->post_excerpt
+            ?: wp_trim_words(strip_tags($post->post_content), 22);
+        if (mb_strlen($seo_description) < 20) {
             $seo_description = 'Discover ' . $title . ($city_name ? ' in ' . $city_name : '') . '. Tickets, timings, highlights and key details in one clean page.';
         }
-        
-        // Save to AIO SEO meta keys
-        update_post_meta($post_id, '_aioseo_title', $seo_title);
-        update_post_meta($post_id, '_aioseo_description', $seo_description);
-        update_post_meta($post_id, '_aioseo_og_title', $seo_title);
-        update_post_meta($post_id, '_aioseo_og_description', $seo_description);
-        update_post_meta($post_id, '_aioseo_twitter_title', $seo_title);
-        update_post_meta($post_id, '_aioseo_twitter_description', $seo_description);
-        
-        $focus_keyphrase = strtolower($title);
-        if ($city_name) {
-            $focus_keyphrase = strtolower($title . ' ' . $city_name);
-        }
-        $additional = array();
-        if ($city_name) {
-            $additional[] = array('keyphrase' => strtolower($city_name . ' attractions'));
-            $additional[] = array('keyphrase' => strtolower($city_name . ' tours'));
-            $additional[] = array('keyphrase' => strtolower($title . ' tickets'));
-        } else {
-            $additional[] = array('keyphrase' => strtolower($title . ' tickets'));
-            $additional[] = array('keyphrase' => strtolower($title . ' booking'));
-            $additional[] = array('keyphrase' => strtolower($title . ' attraction'));
-        }
-        update_post_meta($post_id, '_aioseo_keyphrases', json_encode(array(
-            'focus' => array('keyphrase' => $focus_keyphrase),
-            'additional' => $additional
+        if (mb_strlen($seo_description) > 155) $seo_description = mb_substr($seo_description, 0, 152) . '...';
+
+        $focus_kp = $city_name
+            ? strtolower($title . ' ' . $city_name)
+            : strtolower($title);
+        $extras = array_values(array_filter(array(
+            $city_name ? strtolower($city_name . ' attractions')       : strtolower($title . ' tickets'),
+            $city_name ? strtolower($city_name . ' tours')             : strtolower($title . ' booking'),
+            $cat_name  ? strtolower($cat_name  . ($city_name ? ' in ' . $city_name : '')) : strtolower($title . ' experience'),
         )));
+
+        // ── post meta ────────────────────────────────────────────────────────
+        update_post_meta($post_id, '_aioseo_title',            $seo_title);
+        update_post_meta($post_id, '_aioseo_description',      $seo_description);
+        update_post_meta($post_id, '_aioseo_og_title',         $seo_title);
+        update_post_meta($post_id, '_aioseo_og_description',   $seo_description);
+        update_post_meta($post_id, '_aioseo_twitter_title',    $seo_title);
+        update_post_meta($post_id, '_aioseo_twitter_description', $seo_description);
+        $kp_json = wp_json_encode(array(
+            'focus'  => array('keyphrase' => $focus_kp, 'score' => 0, 'analysis' => new stdClass()),
+            'extras' => array_map(function($k){ return array('keyphrase'=>$k,'score'=>0); }, array_slice($extras,0,3)),
+        ));
+        update_post_meta($post_id, '_aioseo_keyphrases', $kp_json);
+        update_post_meta($post_id, '_aioseo_keywords', wp_json_encode(
+            array_map(function($k){ return array('value'=>$k); }, array_filter(array_merge(array($focus_kp), $extras)))
+        ));
+
+        // ── AIOSEO 4.x table ─────────────────────────────────────────────────
+        $table = $wpdb->prefix . 'aioseo_posts';
+        if ($wpdb->get_var("SHOW TABLES LIKE '{$table}'") === $table) {
+            $now    = current_time('mysql');
+            $exists = $wpdb->get_var($wpdb->prepare("SELECT id FROM `{$table}` WHERE post_id = %d LIMIT 1", $post_id));
+            $row = array('title' => $seo_title, 'description' => $seo_description, 'keyphrases' => $kp_json, 'updated' => $now);
+            if ($exists) {
+                $wpdb->update($table, $row, array('post_id' => $post_id));
+            } else {
+                $wpdb->insert($table, array_merge($row, array('post_id' => $post_id, 'created' => $now)));
+            }
+        }
     }
     
     /**
      * Generate AIO SEO meta for city
      */
     private static function generate_city_seo_meta($term_id) {
+        global $wpdb;
         $term = get_term($term_id, 'travel_city');
         if (!$term || is_wp_error($term)) return;
-        
-        $country_id = get_term_meta($term_id, 'fth_parent_country', true);
+        $brand = class_exists('Flavor_Travel_Hub') ? Flavor_Travel_Hub::get_brand_name() : 'Travel Hub';
+
+        $country_id   = get_term_meta($term_id, 'fth_parent_country', true);
         $country_name = '';
         if ($country_id) {
-            $country = get_term($country_id, 'travel_country');
-            if ($country && !is_wp_error($country)) {
-                $country_name = $country->name;
+            $country_t = get_term($country_id, 'travel_country');
+            if ($country_t && !is_wp_error($country_t)) $country_name = $country_t->name;
+        }
+
+        $seo_title = 'Things to Do in ' . $term->name
+            . ($country_name ? ', ' . $country_name : '')
+            . " – Tours & Activities | {$brand}";
+        $seo_description = 'Discover the best things to do in ' . $term->name
+            . ($country_name ? ', ' . $country_name : '') . '. '
+            . 'Top tours, tickets, attractions and experiences. Best prices guaranteed.';
+
+        $focus_kp = 'things to do in ' . strtolower($term->name);
+        $extras   = array(
+            strtolower($term->name) . ' tours',
+            strtolower($term->name) . ' activities',
+            'best ' . strtolower($term->name) . ' attractions',
+        );
+        $kp_json = wp_json_encode(array(
+            'focus'  => array('keyphrase' => $focus_kp, 'score' => 0, 'analysis' => new stdClass()),
+            'extras' => array_map(function($k){ return array('keyphrase'=>$k,'score'=>0); }, $extras),
+        ));
+
+        // ── term meta ────────────────────────────────────────────────────────
+        update_term_meta($term_id, '_aioseo_title',            $seo_title);
+        update_term_meta($term_id, '_aioseo_description',      $seo_description);
+        update_term_meta($term_id, '_aioseo_og_title',         $seo_title);
+        update_term_meta($term_id, '_aioseo_og_description',   $seo_description);
+        update_term_meta($term_id, '_aioseo_focus_keyphrase',  $focus_kp);
+        update_term_meta($term_id, '_aioseo_keyphrases',       $kp_json);
+        update_term_meta($term_id, '_aioseo_keywords', wp_json_encode(
+            array_map(function($k){ return array('value'=>$k); }, array_merge(array($focus_kp), $extras))
+        ));
+
+        // ── AIOSEO 4.x table ─────────────────────────────────────────────────
+        $table = $wpdb->prefix . 'aioseo_terms';
+        if ($wpdb->get_var("SHOW TABLES LIKE '{$table}'") === $table) {
+            $now    = current_time('mysql');
+            $exists = $wpdb->get_var($wpdb->prepare("SELECT id FROM `{$table}` WHERE term_id = %d LIMIT 1", $term_id));
+            $row = array('title' => $seo_title, 'description' => $seo_description, 'keyphrases' => $kp_json, 'updated' => $now);
+            if ($exists) {
+                $wpdb->update($table, $row, array('term_id' => $term_id));
+            } else {
+                $wpdb->insert($table, array_merge($row, array('term_id' => $term_id, 'created' => $now)));
             }
         }
-        
-        $seo_title = 'Things to Do in ' . $term->name;
-        if ($country_name) {
-            $seo_title .= ', ' . $country_name;
+    }
+
+    /**
+     * Generate AIO SEO meta for country term
+     */
+    private static function generate_country_seo_meta($term_id) {
+        global $wpdb;
+        $term = get_term($term_id, 'travel_country');
+        if (!$term || is_wp_error($term)) return;
+        $brand = class_exists('Flavor_Travel_Hub') ? Flavor_Travel_Hub::get_brand_name() : 'Travel Hub';
+
+        $seo_title       = "Travel to {$term->name} – Top Tours & Experiences | {$brand}";
+        $seo_description = "Plan your trip to {$term->name}. Find the best tours, hotels and activities across top cities. Book with {$brand} for exclusive deals and best prices.";
+        $focus_kp        = strtolower($term->name) . ' travel guide';
+        $extras          = array(
+            'things to do in ' . strtolower($term->name),
+            strtolower($term->name) . ' tours',
+            strtolower($term->name) . ' travel tips',
+        );
+        $kp_json = wp_json_encode(array(
+            'focus'  => array('keyphrase' => $focus_kp, 'score' => 0, 'analysis' => new stdClass()),
+            'extras' => array_map(function($k){ return array('keyphrase'=>$k,'score'=>0); }, $extras),
+        ));
+
+        update_term_meta($term_id, '_aioseo_title',            $seo_title);
+        update_term_meta($term_id, '_aioseo_description',      $seo_description);
+        update_term_meta($term_id, '_aioseo_og_title',         $seo_title);
+        update_term_meta($term_id, '_aioseo_og_description',   $seo_description);
+        update_term_meta($term_id, '_aioseo_focus_keyphrase',  $focus_kp);
+        update_term_meta($term_id, '_aioseo_keyphrases',       $kp_json);
+        update_term_meta($term_id, '_aioseo_keywords', wp_json_encode(
+            array_map(function($k){ return array('value'=>$k); }, array_merge(array($focus_kp), $extras))
+        ));
+
+        $table = $wpdb->prefix . 'aioseo_terms';
+        if ($wpdb->get_var("SHOW TABLES LIKE '{$table}'") === $table) {
+            $now    = current_time('mysql');
+            $exists = $wpdb->get_var($wpdb->prepare("SELECT id FROM `{$table}` WHERE term_id = %d LIMIT 1", $term_id));
+            $row = array('title' => $seo_title, 'description' => $seo_description, 'keyphrases' => $kp_json, 'updated' => $now);
+            if ($exists) {
+                $wpdb->update($table, $row, array('term_id' => $term_id));
+            } else {
+                $wpdb->insert($table, array_merge($row, array('term_id' => $term_id, 'created' => $now)));
+            }
         }
-        $seo_title .= ' | Tours & Activities';
-        
-        $seo_description = 'Discover the best things to do in ' . $term->name . '. ';
-        if ($country_name) {
-            $seo_description .= 'Top attractions in ' . $country_name . '. ';
+    }
+
+    /**
+     * Generate AIO SEO meta for category term
+     */
+    private static function generate_category_seo_meta($term_id) {
+        global $wpdb;
+        $term = get_term($term_id, 'travel_category');
+        if (!$term || is_wp_error($term)) return;
+        $brand = class_exists('Flavor_Travel_Hub') ? Flavor_Travel_Hub::get_brand_name() : 'Travel Hub';
+
+        $seo_title       = "{$term->name} Tours & Activities – Book Online | {$brand}";
+        $seo_description = "Browse the best {$term->name} tours and activities. Compare prices, read reviews and book online instantly with {$brand}.";
+        $focus_kp        = strtolower($term->name) . ' tours';
+        $extras          = array(
+            strtolower($term->name) . ' activities',
+            'book ' . strtolower($term->name) . ' online',
+            'best ' . strtolower($term->name) . ' experiences',
+        );
+        $kp_json = wp_json_encode(array(
+            'focus'  => array('keyphrase' => $focus_kp, 'score' => 0, 'analysis' => new stdClass()),
+            'extras' => array_map(function($k){ return array('keyphrase'=>$k,'score'=>0); }, $extras),
+        ));
+
+        update_term_meta($term_id, '_aioseo_title',            $seo_title);
+        update_term_meta($term_id, '_aioseo_description',      $seo_description);
+        update_term_meta($term_id, '_aioseo_og_title',         $seo_title);
+        update_term_meta($term_id, '_aioseo_og_description',   $seo_description);
+        update_term_meta($term_id, '_aioseo_focus_keyphrase',  $focus_kp);
+        update_term_meta($term_id, '_aioseo_keyphrases',       $kp_json);
+        update_term_meta($term_id, '_aioseo_keywords', wp_json_encode(
+            array_map(function($k){ return array('value'=>$k); }, array_merge(array($focus_kp), $extras))
+        ));
+
+        $table = $wpdb->prefix . 'aioseo_terms';
+        if ($wpdb->get_var("SHOW TABLES LIKE '{$table}'") === $table) {
+            $now    = current_time('mysql');
+            $exists = $wpdb->get_var($wpdb->prepare("SELECT id FROM `{$table}` WHERE term_id = %d LIMIT 1", $term_id));
+            $row = array('title' => $seo_title, 'description' => $seo_description, 'keyphrases' => $kp_json, 'updated' => $now);
+            if ($exists) {
+                $wpdb->update($table, $row, array('term_id' => $term_id));
+            } else {
+                $wpdb->insert($table, array_merge($row, array('term_id' => $term_id, 'created' => $now)));
+            }
         }
-        $seo_description .= 'Book tours, activities, tickets & experiences. Best prices guaranteed.';
-        
-        update_term_meta($term_id, '_aioseo_title', $seo_title);
-        update_term_meta($term_id, '_aioseo_description', $seo_description);
-        update_term_meta($term_id, '_aioseo_og_title', $seo_title);
-        update_term_meta($term_id, '_aioseo_og_description', $seo_description);
-        update_term_meta($term_id, '_aioseo_focus_keyphrase', 'things to do in ' . strtolower($term->name));
     }
     
     /**
@@ -2136,25 +3131,26 @@ public static function import_bulk_city() {
      */
     private static function parse_klook_html($html, $url, $activity_id) {
         $data = array(
-            'title'          => '',
-            'description'    => '',
-            'excerpt'        => '',
-            'price'          => '',
-            'original_price' => '',
-            'currency'       => 'USD',
-            'rating'         => '',
-            'review_count'   => '',
-            'duration'       => '',
-            'highlights'     => '',
-            'inclusions'     => '',
-            'exclusions'     => '',
-            'meeting_point'  => '',
-            'itinerary'      => '',
-            'promo'          => '',
-            'image'          => '',
-            'images'         => array(),
-            'affiliate_link' => '',
-            'activity_id'    => $activity_id,
+            'title'            => '',
+            'description'      => '',
+            'excerpt'          => '',
+            'price'            => '',
+            'original_price'   => '',
+            'currency'         => 'USD',
+            'rating'           => '',
+            'review_count'     => '',
+            'duration'         => '',
+            'highlights'       => '',
+            'inclusions'       => '',
+            'exclusions'       => '',
+            'meeting_point'    => '',
+            'itinerary'        => '',
+            'promo'            => '',
+            'image'            => '',
+            'images'           => array(),
+            'affiliate_link'   => '',
+            'activity_id'      => $activity_id,
+            'klook_categories' => array(), // auto-detected from Klook tags/categories
         );
         
         // Build affiliate link
@@ -2163,8 +3159,21 @@ public static function import_bulk_city() {
         
 
 // METHOD 0: Try __NEXT_DATA__ first (best source on modern Klook pages)
-if (preg_match('/<script[^>]*id=["\']__NEXT_DATA__["\'][^>]*>(.*?)<\/script>/si', $html, $next_match)) {
-    $next_json = json_decode(html_entity_decode(trim($next_match[1]), ENT_QUOTES, 'UTF-8'), true);
+// Use strpos/substr instead of regex to avoid pcre.backtrack_limit on large JSON blobs
+$next_data_raw = '';
+foreach (array('id="__NEXT_DATA__"', "id='__NEXT_DATA__'", 'id="__NEXT_DATA__" ', "id='__NEXT_DATA__' ") as $_nd_marker) {
+    $_nd_pos = strpos($html, $_nd_marker);
+    if ($_nd_pos !== false) {
+        $_nd_gt    = strpos($html, '>', $_nd_pos);
+        $_nd_end   = $_nd_gt !== false ? strpos($html, '</script>', $_nd_gt + 1) : false;
+        if ($_nd_gt !== false && $_nd_end !== false) {
+            $next_data_raw = substr($html, $_nd_gt + 1, $_nd_end - $_nd_gt - 1);
+        }
+        break;
+    }
+}
+if ($next_data_raw !== '') {
+    $next_json = json_decode(html_entity_decode(trim($next_data_raw), ENT_QUOTES, 'UTF-8'), true);
     if (is_array($next_json)) {
         $next_props = isset($next_json['props']['pageProps']) ? $next_json['props']['pageProps'] : $next_json;
 
@@ -2214,9 +3223,44 @@ if (preg_match('/<script[^>]*id=["\']__NEXT_DATA__["\'][^>]*>(.*?)<\/script>/si'
         }
 
         if (empty($data['itinerary'])) {
-            $it_text = self::bullet_lines(self::array_find_first($next_props, array('itinerary', 'itineraries', 'schedule', 'packages', 'packageInfo')), 10);
-            if ($it_text !== '') {
-                $data['itinerary'] = $it_text;
+            $it_keys = array('itinerary','itineraries','schedule','dayByDay','tourItinerary','timeline','routeInfo','activitySchedule','stops','waypoints','tourStops');
+            $it_raw  = self::array_find_first($next_props, $it_keys);
+            if (!empty($it_raw)) {
+                $it_lines = array();
+                if (is_array($it_raw)) {
+                    foreach (array_slice((array) $it_raw, 0, 12) as $step) {
+                        if (is_string($step) && trim($step) !== '') {
+                            $it_lines[] = trim($step);
+                        } elseif (is_array($step)) {
+                            $title = self::normalize_text_block(self::array_find_first($step, array('title','name','locationName','attractionName','activityName','stop','label','place')));
+                            $desc  = self::normalize_text_block(self::array_find_first($step, array('description','content','detail','note','duration','time','hint','info')));
+                            if ($title) {
+                                $it_lines[] = $title . ($desc ? ' – ' . wp_trim_words($desc, 14, '...') : '');
+                            }
+                        }
+                    }
+                } elseif (is_string($it_raw)) {
+                    $it_lines = array_filter(array_map('trim', preg_split('/\r\n|\n|[•\-]/', $it_raw)));
+                }
+                if (!empty($it_lines)) {
+                    $data['itinerary'] = implode("\n", array_slice($it_lines, 0, 12));
+                }
+            }
+            // Fallback: package/sku names as itinerary steps
+            if (empty($data['itinerary'])) {
+                $pkg_raw = self::array_find_first($next_props, array('packages','packageList','packageInfo'));
+                if (is_array($pkg_raw)) {
+                    $it_lines = array();
+                    foreach (array_slice((array) $pkg_raw, 0, 10) as $step) {
+                        if (is_array($step)) {
+                            $title = self::normalize_text_block(self::array_find_first($step, array('name','title','packageName','packageTitle')));
+                            if ($title) $it_lines[] = $title;
+                        }
+                    }
+                    if (!empty($it_lines)) {
+                        $data['itinerary'] = implode("\n", $it_lines);
+                    }
+                }
             }
         }
 
@@ -2252,7 +3296,7 @@ if (preg_match('/<script[^>]*id=["\']__NEXT_DATA__["\'][^>]*>(.*?)<\/script>/si'
         }
 
         if (empty($data['original_price'])) {
-            $orig_candidate = self::array_find_first($next_props, array('originalPrice','marketPrice','strikePrice','retailPrice','crossedPrice'));
+            $orig_candidate = self::array_find_first($next_props, array('originalPrice','marketPrice','strikePrice','retailPrice','crossedPrice','listPrice','originalListPrice'));
             if (is_array($orig_candidate)) {
                 $orig_candidate = self::array_find_first($orig_candidate, array('amount','value','formatValue','displayPrice'));
             }
@@ -2261,6 +3305,33 @@ if (preg_match('/<script[^>]*id=["\']__NEXT_DATA__["\'][^>]*>(.*?)<\/script>/si'
                 if ($op !== '') $data['original_price'] = $op;
             }
         }
+
+        // ── Fallback price search in common Klook price containers ──────────
+        if (empty($data['price'])) {
+            foreach (array('priceInfo','pricing','skuList','packageList','priceDetail','priceMap') as $pcon) {
+                $pnode = self::array_find_first($next_props, array($pcon));
+                if (empty($pnode)) continue;
+                // If a list, take the first item
+                if (is_array($pnode) && isset($pnode[0])) $pnode = $pnode[0];
+                if (!is_array($pnode)) continue;
+                $sp = self::array_find_first($pnode, array('sellPrice','salePrice','discountPrice','price','amount','fromPrice','minSellingPrice','lowestPrice'));
+                if (!empty($sp)) {
+                    $pv = self::normalize_price_amount($sp, 1);
+                    if ($pv !== '') {
+                        $data['price'] = $pv;
+                        if (empty($data['original_price'])) {
+                            $op = self::array_find_first($pnode, array('originalPrice','crossedPrice','marketPrice','strikePrice','retailPrice','listPrice'));
+                            if (!empty($op)) {
+                                $ov = self::normalize_price_amount($op, 1);
+                                if ($ov !== '') $data['original_price'] = $ov;
+                            }
+                        }
+                        break;
+                    }
+                }
+            }
+        }
+
         // Extract FAQ if available
         if (empty($data['faq'])) {
             $faq_candidate = self::array_find_first($next_props, array('faq','faqs','faqList','questionAnswer','qAndA'));
@@ -2304,23 +3375,38 @@ if (preg_match('/<script[^>]*id=["\']__NEXT_DATA__["\'][^>]*>(.*?)<\/script>/si'
             }
         }
 
+        // ── Image extraction — cover all Klook JSON structures ───────────
+        // Klook uses many different key names across their various page types and API versions.
+        $img_scalar_keys = array(
+            'coverImageUrl','imageUrl','image','heroImageUrl','shareImage',
+            'imgUrl','coverImg','thumbnailUrl','thumbnail','cover','imgSrc',
+            'url','src','originalUrl','large','medium','original',
+        );
+        $img_array_keys = array(
+            'coverImages','images','gallery','photos','imageList',
+            'activityImages','packageImages','coverImageList',
+        );
+
         if (empty($data['image'])) {
-            $image_candidate = self::array_find_first($next_props, array('coverImageUrl', 'imageUrl', 'image', 'heroImageUrl', 'shareImage'));
-            if (is_string($image_candidate) && $image_candidate !== '') {
+            // First look for a scalar image URL
+            $image_candidate = self::array_find_first($next_props, $img_scalar_keys);
+            if (is_string($image_candidate) && preg_match('#https?://#', $image_candidate)) {
                 $data['image'] = $image_candidate;
             } elseif (is_array($image_candidate)) {
-                $possible = self::array_find_first($image_candidate, array('url', 'src', 'originalUrl'));
-                if (is_string($possible) && $possible !== '') {
+                $possible = self::array_find_first($image_candidate, $img_scalar_keys);
+                if (is_string($possible) && preg_match('#https?://#', $possible)) {
                     $data['image'] = $possible;
                 }
             }
         }
 
-        $next_images = self::array_collect_values($next_props, array('coverImageUrl', 'imageUrl', 'image', 'gallery', 'images', 'heroImageUrl'));
+        // Collect ALL image URLs from the JSON tree
+        $next_images = self::array_collect_values($next_props, array_merge($img_scalar_keys, $img_array_keys));
         if (!empty($next_images)) {
             $filtered_next = array();
             foreach ($next_images as $img) {
-                if (is_string($img) && preg_match('#https?://#i', $img) && (stripos($img, 'klook') !== false || preg_match('/\.(jpg|jpeg|png|webp)(\?|$)/i', $img))) {
+                if (is_string($img) && preg_match('#https?://#i', $img) &&
+                    (stripos($img, 'klook') !== false || preg_match('/\.(jpg|jpeg|png|webp)(\?|$)/i', $img))) {
                     $filtered_next[] = $img;
                 }
             }
@@ -2329,6 +3415,68 @@ if (preg_match('/<script[^>]*id=["\']__NEXT_DATA__["\'][^>]*>(.*?)<\/script>/si'
                 if (empty($data['image'])) {
                     $data['image'] = $data['images'][0];
                 }
+            }
+        }
+
+        // ── Category / Tag extraction from __NEXT_DATA__ ──────────────────
+        if (empty($data['klook_categories'])) {
+            $raw_cats = array();
+
+            // Broad key search across the whole props tree
+            $cat_keys = array(
+                'activityTags','tags','tagList','labelList','categoryList',
+                'activityCategory','activityType','subCategory','category',
+                'mainCategory','typeList','activityTypeList',
+            );
+            $found_cats = self::array_find_first($next_props, $cat_keys);
+
+            // Also look in breadcrumbs: [Home] > [Category] > [Title]
+            $breadcrumbs = self::array_find_first($next_props, array('breadcrumbs','breadcrumb','breadcrumbList'));
+            if (!empty($breadcrumbs) && is_array($breadcrumbs)) {
+                foreach (array_slice($breadcrumbs, 1, 3) as $crumb) { // skip first (Home)
+                    $crumb_name = '';
+                    if (is_array($crumb)) {
+                        $crumb_name = self::normalize_text_block(self::array_find_first($crumb, array('name','title','label','text')));
+                    } elseif (is_string($crumb)) {
+                        $crumb_name = trim($crumb);
+                    }
+                    // Skip the activity title itself (usually the last breadcrumb)
+                    if ($crumb_name && $crumb_name !== $data['title']) {
+                        $raw_cats[] = $crumb_name;
+                    }
+                }
+            }
+
+            if (!empty($found_cats)) {
+                if (is_string($found_cats) && strlen(trim($found_cats)) > 1) {
+                    $raw_cats[] = trim($found_cats);
+                } elseif (is_array($found_cats)) {
+                    foreach ($found_cats as $cat_item) {
+                        if (is_string($cat_item) && strlen(trim($cat_item)) > 1) {
+                            $raw_cats[] = trim($cat_item);
+                        } elseif (is_array($cat_item)) {
+                            $cn = self::normalize_text_block(self::array_find_first($cat_item, array('name','tagName','label','title','text','value','categoryName')));
+                            if ($cn && strlen($cn) > 1) $raw_cats[] = $cn;
+                        }
+                    }
+                }
+            }
+
+            // Generic words to skip (too broad to be useful as categories)
+            $skip_cats = array(
+                'things to do','activities','tours','attraction','book','klook',
+                'hot','popular','new','recommended','best','top','all','other',
+                'experience','experiences','home','see all',
+            );
+            $clean_cats = array();
+            foreach ($raw_cats as $c) {
+                $c = wp_strip_all_tags(trim($c));
+                if (strlen($c) < 2 || strlen($c) > 60) continue;
+                if (in_array(strtolower($c), $skip_cats, true)) continue;
+                if (!in_array($c, $clean_cats, true)) $clean_cats[] = $c;
+            }
+            if (!empty($clean_cats)) {
+                $data['klook_categories'] = array_slice($clean_cats, 0, 4);
             }
         }
     }
