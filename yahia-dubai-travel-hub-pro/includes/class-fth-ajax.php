@@ -1335,7 +1335,15 @@ public static function discover_import_urls() {
     }
     $new_links = array_slice($new_links, 0, $limit);
     if (empty($new_links)) {
-        self::send_json_error_clean('No new URLs found to import. All discovered items are already in the database.');
+        // All items already exist — return success with empty list so the marathon skips gracefully
+        // (not an error; user can enable "Force Update" to re-import existing items)
+        self::send_json_success_clean(array(
+            'urls'         => array(),
+            'total'        => 0,
+            'skipped'      => $already_count,
+            'force_update' => $force_update,
+            'message'      => 'Tous les articles sont déjà dans la base de données. Activez "Forcer la mise à jour" pour les réimporter.',
+        ));
     }
     self::send_json_success_clean(array(
         'urls'         => $new_links,
@@ -2742,23 +2750,29 @@ public static function import_bulk_city() {
                 // Klook (2024-2025) uses React Query. Same contamination-filtering as activity parser:
                 // skip list/recommendation queries that contain OTHER hotels, use only the primary hotel query.
                 $props = $htl_page_props_raw;
+                $htl_img_fallback_queries = array();
                 if (isset($htl_page_props_raw['dehydratedState']['queries']) && is_array($htl_page_props_raw['dehydratedState']['queries'])) {
                     $htl_primary   = null;
                     $htl_suppl     = array();
-                    $htl_list_pats = array('list','recommend','similar','related','popular','search','nearby','also','suggestion','trending','featured','top','best');
+                    // Narrowed patterns — removed 'trending','featured','top','best','also','suggestion'
+                    // to avoid filtering the primary hotel detail query when its hash contains those words
+                    $htl_list_pats = array('list','recommend','similar','related','popular','search','nearby');
                     foreach ($htl_page_props_raw['dehydratedState']['queries'] as $dq) {
                         if (empty($dq['state']['data'])) continue;
                         $qdata = $dq['state']['data'];
                         $qhash = strtolower(isset($dq['queryHash']) ? $dq['queryHash'] : '');
+                        // Skip definitive lists of hotel objects (structure-based check first)
+                        if (is_array($qdata) && isset($qdata[0]) && is_array($qdata[0])
+                            && (isset($qdata[0]['hotel_id']) || isset($qdata[0]['hotelId'])
+                                || isset($qdata[0]['property_id']) || isset($qdata[0]['hotelName']))) {
+                            continue;
+                        }
                         $is_list = false;
                         foreach ($htl_list_pats as $lp) {
                             if (strpos($qhash, $lp) !== false) { $is_list = true; break; }
                         }
-                        // Also skip if data is an array of hotel objects
-                        if (!$is_list && is_array($qdata) && isset($qdata[0]) && is_array($qdata[0])
-                            && (isset($qdata[0]['hotel_id']) || isset($qdata[0]['hotelId']) || isset($qdata[0]['property_id']))) {
-                            $is_list = true;
-                        }
+                        // Keep for image fallback regardless of hash classification
+                        $htl_img_fallback_queries[] = $qdata;
                         if ($is_list) continue;
                         $is_detail = (strpos($qhash, 'detail') !== false || strpos($qhash, 'gethotel') !== false
                                    || strpos($qhash, 'hoteldetail') !== false || strpos($qhash, 'property') !== false
@@ -2827,6 +2841,21 @@ public static function import_bulk_city() {
                     $data['images'] = array_values(array_unique(array_merge($data['images'], $clean)));
                     if (empty($data['image'])) {
                         $data['image'] = $data['images'][0];
+                    }
+                }
+                // Hotel image fallback: scan all non-list queries regardless of hash filter
+                if (empty($data['image']) && !empty($htl_img_fallback_queries)) {
+                    $img_keys_htl_fb = array('cover_img_url','img_url','coverImageUrl','imageUrl','image',
+                        'heroImageUrl','imgUrl','coverImg','thumbnailUrl','thumbnail','originalUrl','large');
+                    foreach ($htl_img_fallback_queries as $qd_htl) {
+                        $imgs_htl = self::array_collect_values($qd_htl, $img_keys_htl_fb);
+                        foreach ($imgs_htl as $img_htl) {
+                            if (is_string($img_htl) && preg_match('#https?://#', $img_htl)
+                                && (stripos($img_htl, 'klook') !== false || preg_match('/\.(jpg|jpeg|png|webp)(\?|$)/i', $img_htl))) {
+                                $data['image'] = $img_htl;
+                                break 2;
+                            }
+                        }
                     }
                 }
                 // Hotel highlights/facilities
@@ -3326,29 +3355,39 @@ if ($next_data_raw !== '') {
         // description/title/highlights.  List/recommendation queries contain OTHER activities and will
         // contaminate the extracted data if we merge them all together naively.
         $next_props = $page_props_raw;
+        $act_img_fallback_queries = array(); // used for image-only fallback scan below
         if (isset($page_props_raw['dehydratedState']['queries']) && is_array($page_props_raw['dehydratedState']['queries'])) {
             $primary_data = null;  // the query data that IS this specific activity
             $supplement   = array(); // other useful queries (packages, prices) — searched after primary
 
-            // Patterns that indicate a query holds OTHER activities (not the current one)
-            $contamination_patterns = array('list','recommend','similar','related','popular','search','nearby','also','suggestion','more','trending','featured','top','best');
+            // NARROWED contamination patterns — only clear list-of-other-activities indicators.
+            // Removed: 'trending','featured','top','best','more','also','suggestion'
+            // because these patterns match legitimate detail query hashes like
+            // "getBestValueActivityDetail", "getFeaturedPackage", "getTopReviewDetail" etc.
+            // and cause the primary data to be discarded entirely (empty page, no images, no prices).
+            $contamination_patterns = array('list','recommend','similar','related','popular','search','nearby');
 
             foreach ($page_props_raw['dehydratedState']['queries'] as $dq) {
                 if (empty($dq['state']['data'])) continue;
                 $qdata = $dq['state']['data'];
                 $qhash = strtolower(isset($dq['queryHash']) ? $dq['queryHash'] : '');
 
-                // Skip queries that are lists of OTHER activities — these cause cross-contamination
+                // PRIMARY guard: skip if data is a numerically-indexed array of activity objects
+                // (definitive indicator of a "list of other activities" query)
+                if (is_array($qdata) && isset($qdata[0]) && is_array($qdata[0])
+                    && (isset($qdata[0]['activity_id']) || isset($qdata[0]['activityId'])
+                        || isset($qdata[0]['activityName']) || isset($qdata[0]['activity_name']))) {
+                    continue; // skip activity list — would contaminate text fields
+                }
+
+                // SECONDARY guard: hash-based filtering (narrowed set — only clear list markers)
                 $is_list = false;
                 foreach ($contamination_patterns as $cp) {
                     if (strpos($qhash, $cp) !== false) { $is_list = true; break; }
                 }
-                // Also skip if the data is a numerically-indexed array of multiple activities
-                if (!$is_list && is_array($qdata) && isset($qdata[0]) && is_array($qdata[0])
-                    && (isset($qdata[0]['activity_id']) || isset($qdata[0]['activityId']))) {
-                    $is_list = true;
-                }
-                if ($is_list) continue;
+                // Keep query for image fallback regardless of hash classification
+                $act_img_fallback_queries[] = $qdata;
+                if ($is_list) continue; // skip for text extraction but URL already saved for image fallback
 
                 // Try to find the query that matches our specific activity_id (from URL)
                 if (!empty($activity_id)) {
@@ -3626,6 +3665,24 @@ if ($next_data_raw !== '') {
                 $data['images'] = array_values(array_unique(array_merge($data['images'], $filtered_next)));
                 if (empty($data['image'])) {
                     $data['image'] = $data['images'][0];
+                }
+            }
+
+            // ── Image fallback: scan ALL dehydratedState queries (ignoring text contamination
+            // filter) to find image URLs that may have been in hash-filtered queries.
+            // We only skip definitive lists of activity objects (wrong images would be used otherwise).
+            if (empty($data['image']) && !empty($act_img_fallback_queries)) {
+                $img_keys_fb = array('cover_img_url','img_url','coverImageUrl','imageUrl','image',
+                    'heroImageUrl','imgUrl','coverImg','thumbnailUrl','thumbnail','originalUrl','large');
+                foreach ($act_img_fallback_queries as $qd_fb) {
+                    $imgs_fb = self::array_collect_values($qd_fb, $img_keys_fb);
+                    foreach ($imgs_fb as $img_fb) {
+                        if (is_string($img_fb) && preg_match('#https?://#', $img_fb)
+                            && (stripos($img_fb, 'klook') !== false || preg_match('/\.(jpg|jpeg|png|webp)(\?|$)/i', $img_fb))) {
+                            $data['image'] = $img_fb;
+                            break 2;
+                        }
+                    }
                 }
             }
         }

@@ -3036,7 +3036,8 @@ if (document.readyState === 'loading') {
 
                         if (!discRes.success || !discRes.data || !discRes.data.urls || !discRes.data.urls.length) {
                             var msg = discRes.data && discRes.data.message ? discRes.data.message : 'Aucun résultat';
-                            log('⚠️ ' + cityInfo.name + ' (' + typeLabel + '): ' + msg, '#fbbf24');
+                            var isAlreadyImported = discRes.success && discRes.data && discRes.data.skipped > 0;
+                            log((isAlreadyImported ? 'ℹ️' : '⚠️') + ' ' + cityInfo.name + ' (' + typeLabel + '): ' + msg, isAlreadyImported ? '#60a5fa' : '#fbbf24');
                             skipped += (discRes.data && discRes.data.skipped) ? discRes.data.skipped : 0;
                             updateStats();
                             continue;
