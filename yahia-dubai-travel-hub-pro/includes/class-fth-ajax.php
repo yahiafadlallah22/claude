@@ -657,11 +657,54 @@ private static function fetch_klook_listing_via_api($type, $city_id, $limit = 10
         'Origin'          => 'https://www.klook.com',
         'Referer'         => 'https://www.klook.com/',
     );
-    $urls  = array();
-    $pages = ceil($limit / 20);
+    $urls   = array();
+    $pages  = ceil($limit / 20);
+    $sa_key = self::get_scraperapi_key();
+
+    // Helper: try one listing API endpoint (direct first, then via ScraperAPI proxy if needed)
+    $try_listing_ep = function($ep) use ($headers, $sa_key) {
+        // 1. Direct call
+        $r    = self::remote_get($ep, array('timeout' => 25, 'headers' => $headers));
+        $body = !is_wp_error($r) ? wp_remote_retrieve_body($r) : '';
+        $trimmed = ltrim((string) $body);
+        $is_json = !empty($trimmed) && strncasecmp($trimmed, '<', 1) !== 0;
+        if (!$is_json && $sa_key) {
+            // 2. Via ScraperAPI (no render — cheap proxy for JSON APIs)
+            $sa_ep = 'https://api.scraperapi.com?' . http_build_query(array(
+                'api_key'      => $sa_key,
+                'url'          => $ep,
+                'country_code' => 'us',
+            ));
+            $r2    = self::remote_get($sa_ep, array('timeout' => 60, 'headers' => $headers));
+            $body2 = !is_wp_error($r2) ? wp_remote_retrieve_body($r2) : '';
+            $t2    = ltrim((string) $body2);
+            if (!empty($t2) && strncasecmp($t2, '<', 1) !== 0) $body = $body2;
+        }
+        $json = json_decode($body, true);
+        return is_array($json) ? $json : null;
+    };
+
+    // Helper: parse a list JSON response and return item arrays (hotels or activities)
+    $parse_items_hotel = function($json) {
+        $items = self::array_find_first($json, array('hotels','items','list','data','result'));
+        if (!is_array($items)) {
+            foreach ($json as $v) {
+                if (is_array($v) && isset($v[0]) && is_array($v[0])) { $items = $v; break; }
+            }
+        }
+        return is_array($items) ? $items : array();
+    };
+    $parse_items_act = function($json) {
+        $items = self::array_find_first($json, array('activities','items','list','data','result','experiences'));
+        if (!is_array($items)) {
+            foreach ($json as $v) {
+                if (is_array($v) && isset($v[0]) && is_array($v[0])) { $items = $v; break; }
+            }
+        }
+        return is_array($items) ? $items : array();
+    };
 
     if ($type === 'hotel') {
-        // Hotel listing API endpoints (tried in order)
         $list_endpoints = array(
             'https://www.klook.com/api/merapi/v2/hotel/search/?city_id=%d&currency=USD&language=en-US&page=%d&page_size=20',
             'https://www.klook.com/v1/hotellist/getCityHotelList/?city_id=%d&currency=USD&language=en-US&page=%d&per_page=20',
@@ -669,22 +712,13 @@ private static function fetch_klook_listing_via_api($type, $city_id, $limit = 10
         );
         foreach ($list_endpoints as $tpl) {
             if (count($urls) >= $limit) break;
+            $ep_urls_before = count($urls);
             for ($pg = 1; $pg <= $pages; $pg++) {
-                $ep  = sprintf($tpl, $city_id, $pg);
-                $r   = self::remote_get($ep, array('timeout' => 20, 'headers' => $headers));
-                if (is_wp_error($r)) continue;
-                $body = wp_remote_retrieve_body($r);
-                $json = json_decode($body, true);
-                if (!is_array($json)) continue;
-                // Dig through various wrapper structures: result, data, hotels, list, items
-                $items = self::array_find_first($json, array('hotels','items','list','data','result'));
-                if (!is_array($items)) {
-                    // Maybe the wrapper is nested one level deeper
-                    foreach ($json as $v) {
-                        if (is_array($v) && isset($v[0]) && is_array($v[0])) { $items = $v; break; }
-                    }
-                }
-                if (!is_array($items) || empty($items)) continue;
+                $ep   = sprintf($tpl, $city_id, $pg);
+                $json = $try_listing_ep($ep);
+                if (!$json) continue;
+                $items = $parse_items_hotel($json);
+                if (empty($items)) break; // no more results
                 foreach ($items as $item) {
                     if (!is_array($item)) continue;
                     $hid  = (string) self::array_find_first($item, array('hotel_id','hotelId','id','property_id'));
@@ -700,10 +734,9 @@ private static function fetch_klook_listing_via_api($type, $city_id, $limit = 10
                     if (count($urls) >= $limit) break 2;
                 }
             }
-            if (!empty($urls)) break; // one endpoint succeeded — no need to try others
+            if (count($urls) > $ep_urls_before) break; // endpoint worked
         }
     } else {
-        // Activity listing API endpoints
         $list_endpoints = array(
             'https://www.klook.com/v1/experiencelist/getExperienceList/?city_id=%d&currency=USD&language=en-US&page=%d&per_page=20',
             'https://www.klook.com/api/merapi/v2/activity/search/?city_id=%d&currency=USD&language=en-US&page=%d&page_size=20',
@@ -711,20 +744,13 @@ private static function fetch_klook_listing_via_api($type, $city_id, $limit = 10
         );
         foreach ($list_endpoints as $tpl) {
             if (count($urls) >= $limit) break;
+            $ep_urls_before = count($urls);
             for ($pg = 1; $pg <= $pages; $pg++) {
-                $ep  = sprintf($tpl, $city_id, $pg);
-                $r   = self::remote_get($ep, array('timeout' => 20, 'headers' => $headers));
-                if (is_wp_error($r)) continue;
-                $body = wp_remote_retrieve_body($r);
-                $json = json_decode($body, true);
-                if (!is_array($json)) continue;
-                $items = self::array_find_first($json, array('activities','items','list','data','result','experiences'));
-                if (!is_array($items)) {
-                    foreach ($json as $v) {
-                        if (is_array($v) && isset($v[0]) && is_array($v[0])) { $items = $v; break; }
-                    }
-                }
-                if (!is_array($items) || empty($items)) continue;
+                $ep   = sprintf($tpl, $city_id, $pg);
+                $json = $try_listing_ep($ep);
+                if (!$json) continue;
+                $items = $parse_items_act($json);
+                if (empty($items)) break;
                 foreach ($items as $item) {
                     if (!is_array($item)) continue;
                     $aid  = (string) self::array_find_first($item, array('activity_id','activityId','id'));
@@ -740,11 +766,70 @@ private static function fetch_klook_listing_via_api($type, $city_id, $limit = 10
                     if (count($urls) >= $limit) break 2;
                 }
             }
-            if (!empty($urls)) break;
+            if (count($urls) > $ep_urls_before) break;
         }
     }
 
     return array_values(array_unique($urls));
+}
+
+/**
+ * Look up a Klook numeric city ID from a city slug (e.g. 'abu-dhabi' → '25').
+ * Tries Klook's search suggestion API, direct then via ScraperAPI proxy.
+ */
+private static function lookup_klook_city_id_from_slug($city_slug) {
+    if (empty($city_slug)) return '';
+    $query   = str_replace('-', ' ', $city_slug);
+    $headers = array('Accept' => 'application/json', 'Accept-Language' => 'en-US,en;q=0.9', 'X-Requested-With' => 'XMLHttpRequest');
+    $sa_key  = self::get_scraperapi_key();
+
+    $endpoints = array(
+        'https://www.klook.com/v1/search/getSearchSuggestion/?query=' . rawurlencode($query) . '&language=en-US&currency=USD',
+        'https://www.klook.com/api/merapi/v1/search/suggestion/?query=' . rawurlencode($query) . '&language=en-US',
+    );
+
+    foreach ($endpoints as $ep) {
+        $urls_to_try = array($ep);
+        if ($sa_key) {
+            $urls_to_try[] = 'https://api.scraperapi.com?' . http_build_query(array('api_key' => $sa_key, 'url' => $ep, 'country_code' => 'us'));
+        }
+        foreach ($urls_to_try as $fetch_url) {
+            $r = self::remote_get($fetch_url, array('timeout' => 20, 'headers' => $headers));
+            if (is_wp_error($r)) continue;
+            $body    = wp_remote_retrieve_body($r);
+            $trimmed = ltrim((string) $body);
+            if (empty($trimmed) || strncasecmp($trimmed, '<', 1) === 0) continue;
+            $json = json_decode($body, true);
+            if (!is_array($json)) continue;
+            $city_id = self::extract_city_id_from_search_json($json, $city_slug);
+            if ($city_id) return $city_id;
+        }
+    }
+    return '';
+}
+
+/**
+ * Recursively search a Klook search-suggestion JSON for a city ID matching the slug.
+ */
+private static function extract_city_id_from_search_json($data, $target_slug) {
+    if (!is_array($data)) return '';
+    foreach ($data as $v) {
+        if (!is_array($v)) continue;
+        $type = strtolower((string) self::array_find_first($v, array('type','obj_type','entity_type')));
+        if (in_array($type, array('city','destination','place','location','region'), true)) {
+            $name = strtolower((string) self::array_find_first($v, array('name','city_name','title')));
+            $slug = preg_replace('/[^a-z0-9]+/', '-', trim($name));
+            $slug = trim($slug, '-');
+            if ($slug === $target_slug || str_replace('-', '', $slug) === str_replace('-', '', $target_slug)) {
+                $id = (string) self::array_find_first($v, array('id','city_id','cityId','destination_id'));
+                if ($id !== '' && is_numeric($id)) return $id;
+            }
+        }
+        // Recurse into nested arrays
+        $found = self::extract_city_id_from_search_json($v, $target_slug);
+        if ($found) return $found;
+    }
+    return '';
 }
 
 /**
@@ -760,23 +845,41 @@ private static function discover_klook_urls_via_cdx($type, $city_slug, $limit = 
     if (empty($city_slug)) return array();
 
     if ($type === 'hotel') {
-        // Modern Klook hotel URLs: /en-US/hotels/{id}-{hotel-slug}/
-        // Scan all /en-US/hotels/ URLs and filter by city_slug appearing anywhere in the URL
-        $q = http_build_query(array(
-            'url'        => 'www.klook.com/en-US/hotels/',
-            'output'     => 'json',
-            'fl'         => 'original',
-            'collapse'   => 'urlkey',
-            'limit'      => min($limit + 100, 400),
-            'matchType'  => 'prefix',
-            'from'       => date('Ymd', strtotime('-3 years')),
-        ));
-        // Filter: must be a single-hotel URL (has numeric ID) and contain city slug
-        $q .= '&filter=statuscode:200';
-        $q .= '&filter=original:.*hotels%2F[0-9].*';
-        if ($city_slug) {
-            $q .= '&filter=original:.*' . rawurlencode($city_slug) . '.*';
+        // Hotel URLs like /hotels/12345-some-name/ do NOT contain the city slug,
+        // so we cannot filter CDX hotel detail URLs by city name.
+        // Instead: find archived snapshots of the HOTEL LISTING page for this city,
+        // then parse them to extract hotel IDs (which do belong to this city).
+        $listing_urls = array(
+            'www.klook.com/en-US/hotels/' . $city_slug . '/',
+            'www.klook.com/hotels/' . $city_slug . '/',
+        );
+        foreach ($listing_urls as $lu) {
+            $cdx_q = http_build_query(array(
+                'url'    => $lu,
+                'output' => 'json',
+                'fl'     => 'timestamp',
+                'limit'  => 5,
+                'from'   => date('Ymd', strtotime('-3 years')),
+                'to'     => date('Ymd'),
+            ));
+            $r = self::remote_get('https://web.archive.org/cdx/search/cdx?' . $cdx_q, array('timeout' => 25));
+            if (is_wp_error($r)) continue;
+            $rows = json_decode(wp_remote_retrieve_body($r), true);
+            if (!is_array($rows) || count($rows) < 2) continue;
+            foreach (array_slice($rows, 1) as $row) {
+                if (empty($row[0])) continue;
+                $wb_url = 'https://web.archive.org/web/' . $row[0] . 'if_/https://' . $lu;
+                $wb_r   = self::remote_get($wb_url, array('timeout' => 60));
+                if (is_wp_error($wb_r)) continue;
+                $wb_b   = wp_remote_retrieve_body($wb_r);
+                if (empty($wb_b)) continue;
+                $hotel_links = self::extract_hotel_links_from_html($wb_b);
+                if (!empty($hotel_links)) {
+                    return array_slice(array_values(array_unique($hotel_links)), 0, $limit);
+                }
+            }
         }
+        return array();
     } else {
         // Activity URLs: /en-US/activity/{id}-{slug-containing-city}/
         // Use CDX with city slug filter on the original URL
@@ -1728,6 +1831,12 @@ public static function discover_import_urls() {
         // ── Klook JSON listing API (bypasses DataDome like detail pages do) ───
         // Klook's internal REST endpoints are not behind the DataDome browser challenge.
         // We call the listing API to get IDs, then construct individual detail page URLs.
+
+        // If we only have a slug (no numeric ID), look up the city ID via Klook search API.
+        if (empty($city_id_num) && !empty($city_slug_cdx)) {
+            $city_id_num = self::lookup_klook_city_id_from_slug($city_slug_cdx);
+        }
+
         if (!empty($city_id_num)) {
             $klook_api_urls = self::fetch_klook_listing_via_api($type, $city_id_num, $pool_target);
             if (!empty($klook_api_urls)) {
