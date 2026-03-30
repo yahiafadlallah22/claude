@@ -858,18 +858,25 @@ private static function extract_activity_links_from_html($body) {
 private static function extract_hotel_links_from_html($body) {
     $links = array();
     $patterns = array(
+        // New Klook URL format: /hotels/{id}-{slug}/ (no /detail/)
+        '#href=["\'](https://www\.klook\.com/[^"\']*/hotels?/\d+[^"\']*)["\']#i',
+        '#href=["\'](/[^"\']*/hotels?/\d+[^"\']*)["\']#i',
+        '#https?://www\.klook\.com/[^"\'\s<>]*/hotels?/\d+[^"\'\s<>]*#i',
+        // Legacy /hotel/detail/ format
         '#href=["\'](https://www\.klook\.com/[^"\']*/hotels?/detail/[^"\']*)["\']#i',
         '#href=["\'](/[^"\']*/hotels?/detail/[^"\']*)["\']#i',
         '#https?://www\.klook\.com/[^"\'\s<>]*/hotels?/detail/[^"\'\s<>]*#i',
-        '#/[^"\'\s<>]*/hotels?/detail/[^"\'\s<>]*#i',
+        // JSON encoded URLs
+        '#"url"\s*:\s*"(\/[^"\n]*?/hotels?/\d+[^"\n]*)"#i',
         '#"url"\s*:\s*"(\/[^"\n]*?/hotels?/detail/[^"\n]*)"#i',
-        '#https?:\\/\\/www\\.klook\\.com\\/[^"\s]*?hotels?\\/detail\\/[^"\s]*#i'
     );
     foreach ($patterns as $pattern) {
         if (preg_match_all($pattern, $body, $m)) {
             foreach (($m[1] ?? $m[0]) as $found) {
                 $found = self::normalize_klook_link($found);
-                if ($found && strpos($found, '/detail/') !== false) {
+                if (!$found) continue;
+                // Must contain /hotels/ or /hotel/ with a numeric ID
+                if (preg_match('#/hotels?/(?:detail/)?\d+#i', $found)) {
                     $links[] = $found;
                 }
             }
@@ -1239,9 +1246,9 @@ public static function discover_import_urls() {
             $real_url = preg_replace('#(https?://(?:www\.)?klook\.com)/#', '$1/en-US/', $real_url);
         }
     }
-    // For destination URLs without tab suffix, add the activities tab
+    // For destination URLs without tab suffix, add the activities/hotel tab
     $base_listing = $real_url;
-    if (strpos($real_url, '/destination/') !== false && !preg_match('#/\d+-[a-z]#', $real_url)) {
+    if (strpos($real_url, '/destination/') !== false && !preg_match('#/(?:1-things-to-do|2-tours|3-hotel|4-restaurants)#i', $real_url)) {
         $base_listing = trailingslashit($real_url) . ($type === 'hotel' ? '3-hotel/' : '1-things-to-do/');
     }
 
@@ -1285,7 +1292,7 @@ public static function discover_import_urls() {
     $all_links = array_values(array_unique($all_links));
     // Filter already-imported
     $already = self::get_imported_klook_ids($type);
-    $id_pattern = $type === 'hotel' ? '#/hotel/(\d+)-|/detail/(\d+)-#' : '#/activity/(\d+)-#';
+    $id_pattern = $type === 'hotel' ? '#/hotels?/(?:detail/)?(\d+)-#' : '#/activity/(\d+)-#';
     $new_links = array();
     foreach ($all_links as $lnk) {
         if (preg_match($id_pattern, $lnk, $lm)) {
@@ -2421,7 +2428,7 @@ public static function import_bulk_city() {
             $skipped_hotels = 0;
             $new_links      = array();
             foreach ($links as $lnk) {
-                if (preg_match('#/hotel/(\d+)-|/detail/(\d+)-#', $lnk, $lm)) {
+                if (preg_match('#/hotels?/(?:detail/)?(\d+)-#', $lnk, $lm)) {
                     $hid = !empty($lm[1]) ? $lm[1] : $lm[2];
                     if (in_array($hid, $already_imported_hotel_ids, true)) {
                         $skipped_hotels++;
@@ -2604,7 +2611,9 @@ public static function import_bulk_city() {
             'affiliate_link' => self::build_affiliate_redirect($url),
             'hotel_id'       => '',
         );
-        if (preg_match('/(?:detail|hotel)[^0-9]*(\d{3,})/i', $url, $m)) {
+        if (preg_match('#/hotels?/(?:detail/)?(\d+)#i', $url, $m)) {
+            $data['hotel_id'] = $m[1];
+        } elseif (preg_match('/(?:detail|hotel)[^0-9]*(\d{3,})/i', $url, $m)) {
             $data['hotel_id'] = $m[1];
         }
         if (preg_match_all('/<script[^>]+type=["\']application\/ld\+json["\'][^>]*>(.*?)<\/script>/si', $html, $jsonld_matches)) {

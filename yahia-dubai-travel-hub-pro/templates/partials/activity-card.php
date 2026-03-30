@@ -50,7 +50,7 @@ $symbol = isset($currency_symbols[$currency]) ? $currency_symbols[$currency] : $
         <div class="fth-card-meta">
             <?php if ($card_rating): ?>
             <div class="fth-card-rating">
-                <i class="fas fa-star"></i>
+                ⭐
                 <strong><?php echo number_format((float)$card_rating, 1); ?></strong>
                 <?php if ($card_reviews): ?>
                     <span class="fth-card-reviews">(<?php echo number_format((int)$card_reviews); ?>)</span>
@@ -62,11 +62,11 @@ $symbol = isset($currency_symbols[$currency]) ? $currency_symbols[$currency] : $
         
         <div class="fth-card-features">
             <span class="fth-card-feature">
-                <i class="fas fa-check-circle"></i> Instant Confirmation
+                ✅ Instant Confirmation
             </span>
             <?php if ($card_duration): ?>
             <span class="fth-card-feature">
-                <i class="fas fa-clock"></i> <?php echo esc_html($card_duration); ?>
+                ⏱ <?php echo esc_html($card_duration); ?>
             </span>
             <?php endif; ?>
         </div>

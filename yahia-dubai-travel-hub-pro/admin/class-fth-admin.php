@@ -1645,6 +1645,7 @@ class FTH_Admin {
         });
 
 // ── Marathon Import ──────────────────────────────────────────────────
+jQuery(document).ready(function($) {
 // Auto-prefill from Klook Links Library
 (function() {
     var p = new URLSearchParams(window.location.search);
@@ -1653,15 +1654,12 @@ class FTH_Admin {
         var tp = p.get('fthll_prefill_type') || 'activity';
         var city = p.get('fthll_prefill_city') || '';
         var country = p.get('fthll_prefill_country') || '';
-        $(document).ready(function() {
-            $('#fth_marathon_url').val(u);
-            if (tp && $('#fth_marathon_type option[value="'+tp+'"]').length) $('#fth_marathon_type').val(tp);
-            if (city) { var $co = $('#fth_marathon_city option'); $co.filter(function(){ return $(this).val().toLowerCase() === city; }).prop('selected', true); }
-            if (country) { var $co2 = $('#fth_marathon_country option'); $co2.filter(function(){ return $(this).val().toLowerCase() === country; }).prop('selected', true); }
-            // scroll to marathon panel
-            var $panel = $('#fth_marathon_url').closest('div[style]');
-            if ($panel.length) $('html,body').animate({scrollTop: $panel.offset().top - 40}, 500);
-        });
+        $('#fth_marathon_url').val(u);
+        if (tp && $('#fth_marathon_type option[value="'+tp+'"]').length) $('#fth_marathon_type').val(tp);
+        if (city) { var $co = $('#fth_marathon_city option'); $co.filter(function(){ return $(this).val().toLowerCase() === city; }).prop('selected', true); }
+        if (country) { var $co2 = $('#fth_marathon_country option'); $co2.filter(function(){ return $(this).val().toLowerCase() === country; }).prop('selected', true); }
+        var $panel = $('#fth_marathon_url').closest('div[style]');
+        if ($panel.length) $('html,body').animate({scrollTop: $panel.offset().top - 40}, 500);
     }
 })();
 
@@ -1771,6 +1769,7 @@ $('#fth_marathon_btn').on('click', function() {
 });
 
 $('#fth_marathon_stop').on('click', function() { fthMarathonStop = true; $(this).hide(); });
+}); // end marathon jQuery ready
         </script>
         <?php
     }
@@ -1787,10 +1786,10 @@ $('#fth_marathon_stop').on('click', function() { fthMarathonStop = true; $(this)
         $klook_cities = array(
 
             'Middle East' => array(
-                array('Dubai',          'UAE',          'dubai-city-things-to-do',         'dubai-hotel'),
-                array('Abu Dhabi',      'UAE',          'abu-dhabi-things-to-do',           'abu-dhabi-hotel'),
+                array('Dubai',          'UAE',          'destination/c78-dubai/1-things-to-do',       'destination/c78-dubai/3-hotel'),
+                array('Abu Dhabi',      'UAE',          'destination/c79-abu-dhabi/1-things-to-do',   'destination/c79-abu-dhabi/3-hotel'),
                 array('Sharjah',        'UAE',          'sharjah-things-to-do',             'sharjah-hotel'),
-                array('Doha',           'Qatar',        'doha-things-to-do',                'doha-hotel'),
+                array('Doha',           'Qatar',        'destination/c80-doha/1-things-to-do',        'destination/c80-doha/3-hotel'),
                 array('Riyadh',         'Saudi Arabia', 'riyadh-things-to-do',              'riyadh-hotel'),
                 array('Jeddah',         'Saudi Arabia', 'jeddah-things-to-do',              'jeddah-hotel'),
                 array('Mecca',          'Saudi Arabia', 'mecca-things-to-do',               'mecca-hotel'),
@@ -2106,6 +2105,11 @@ $('#fth_marathon_stop').on('click', function() { fthMarathonStop = true; $(this)
         );
 
         $base = 'https://www.klook.com/en-US';
+        // Build URL helper: supports both destination/cID-slug/1-tab and things-to-do/slug formats
+        $klook_url = function($path) use ($base) {
+            // If path already looks like a full segment (contains /), use as-is
+            return $base . '/' . ltrim($path, '/');
+        };
         $total_cities = 0;
         foreach ($klook_cities as $region => $cities) $total_cities += count($cities);
         ?>
@@ -2150,9 +2154,14 @@ $('#fth_marathon_stop').on('click', function() { fthMarathonStop = true; $(this)
             $row_idx = 0;
             foreach ($klook_cities as $region => $cities):
                 foreach ($cities as $city_data):
-                    list($city_name, $country, $act_slug, $htl_slug) = $city_data;
-                    $act_url = $base . '/things-to-do/' . $act_slug . '/';
-                    $htl_url = $base . '/hotels/' . $htl_slug . '/';
+                    list($city_name, $country, $act_path, $htl_path) = $city_data;
+                    // Support both destination/cID-slug/tab paths and legacy things-to-do/slug paths
+                    $act_url = (strpos($act_path, '/') !== false)
+                        ? $klook_url($act_path)
+                        : $klook_url('things-to-do/' . $act_path . '/');
+                    $htl_url = (strpos($htl_path, '/') !== false)
+                        ? $klook_url($htl_path)
+                        : $klook_url('hotels/' . $htl_path . '/');
                     $bg = ($row_idx % 2 === 0) ? '#fff' : '#f8f9fa';
                     $row_idx++;
             ?>

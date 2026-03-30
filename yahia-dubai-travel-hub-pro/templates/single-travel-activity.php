@@ -207,12 +207,6 @@ body.single-travel_activity .widget-area,body.single-travel_activity .sidebar,bo
         <?php if ($meeting_point): ?><p style="margin-top:14px;font-size:14px;"><strong>Meeting point:</strong> <?php echo esc_html($meeting_point); ?></p><?php endif; ?>
       </div>
 
-      <!-- Yahia Fadlallah exclusive deal card – shown right after description -->
-      <div class="kl-section" style="text-align:center;padding:16px">
-        <img src="https://yahiadubai.com/wp-content/uploads/2026/03/New-Project-4.png" alt="Yahia Fadlallah" style="max-width:90px;height:auto;display:block;margin:0 auto 10px;border-radius:8px;">
-        <div style="font-size:14px;color:#92400e;font-weight:700;background:#fff7ed;border:1px solid #fed7aa;border-radius:8px;padding:10px;">🤝 <?php echo esc_html($promo_text); ?></div>
-      </div>
-
       <!-- Highlights -->
       <?php if ($highlights):
         $hl_lines = array_filter(array_map('trim', explode("\n", $highlights))); ?>
@@ -343,7 +337,7 @@ body.single-travel_activity .widget-area,body.single-travel_activity .sidebar,bo
         </a>
         <?php
         // Social proof: seeded-random so same visitor sees same number within a session
-        $sp_seed  = (int) substr(md5($post_id . date('Ymd') . session_id()), 0, 6);
+        $sp_seed  = (int) substr(md5($post_id . date('Ymd')), 0, 6);
         $sp_count = 47 + ($sp_seed % 289); // range 47–335
         $sp_unit  = $sp_count > 200 ? 'this week' : 'today';
         ?>
