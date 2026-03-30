@@ -45,6 +45,14 @@ class FTH_Templates {
             }
         }
         
+        // Passes Hub Page (/passes/)
+        if (is_page('passes') || (is_page() && get_page_by_path('passes') && get_the_ID() === get_page_by_path('passes')->ID)) {
+            $custom = FTH_PLUGIN_DIR . 'templates/page-passes.php';
+            if (file_exists($custom)) {
+                return $custom;
+            }
+        }
+
         // Hotels Hub Page (/hotels/)
         if (is_page('hotels') || (is_page() && get_page_by_path('hotels') && get_the_ID() === get_page_by_path('hotels')->ID)) {
             $custom = FTH_PLUGIN_DIR . 'templates/page-hotels.php';

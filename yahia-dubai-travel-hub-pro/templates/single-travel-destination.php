@@ -46,7 +46,6 @@ $activity_count = $city_term ? FTH_Templates::get_city_activity_count($city_term
 get_header();
 ?>
 
-<link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
 <style>
     .fth-container *, .fth-container *::before, .fth-container *::after { box-sizing: border-box; }
     :root { --klook-primary: <?php echo esc_attr($primary_color); ?>; --klook-primary-dark: <?php echo esc_attr(FTH_Public::darken_color($primary_color, 10)); ?>; --klook-text: #1a1a1a; --klook-text-secondary: #666; --klook-text-light: #999; --klook-bg: #fff; --klook-bg-gray: #f5f5f5; --klook-border: #e8e8e8; --klook-star: #ff9800; }
@@ -119,7 +118,7 @@ get_header();
             <form class="fth-search-box" action="<?php echo esc_url(get_permalink()); ?>" method="get">
                 <?php if ($city_term): ?><input type="hidden" name="fth_city" value="<?php echo esc_attr($city_term->slug); ?>"><?php endif; ?>
                 <input type="text" name="fth_search" class="fth-search-input" placeholder="Search activities in <?php the_title_attribute(); ?>...">
-                <button type="submit" class="fth-search-btn"><i class="fas fa-search"></i> Search</button>
+                <button type="submit" class="fth-search-btn">🔍 Search</button>
             </form>
         </div>
     </section>
@@ -143,14 +142,14 @@ get_header();
         <?php if (!empty($categories) && $city_term): ?>
         <div class="fth-categories-scroll">
             <?php foreach (array_slice($categories, 0, 10) as $cat): $icon = get_term_meta($cat->term_id, 'fth_icon', true); ?>
-            <a href="<?php echo add_query_arg('fth_city', $city_term->slug, get_term_link($cat)); ?>" class="fth-category-pill"><?php if ($icon): ?><i class="fa <?php echo esc_attr($icon); ?>"></i><?php endif; ?><?php echo esc_html($cat->name); ?></a>
+            <a href="<?php echo add_query_arg('fth_city', $city_term->slug, get_term_link($cat)); ?>" class="fth-category-pill"><?php echo esc_html(FTH_Templates::get_category_emoji($cat)); ?> <?php echo esc_html($cat->name); ?></a>
             <?php endforeach; ?>
         </div>
         <?php endif; ?>
         
         <?php if ($activities && $activities->have_posts()): ?>
         <section>
-            <h2 class="fth-section-title"><i class="fas fa-fire"></i>Top Things to Do in <?php the_title(); ?></h2>
+            <h2 class="fth-section-title">🔥 Top Things to Do in <?php the_title(); ?></h2>
             <div class="fth-grid">
                 <?php while ($activities->have_posts()): $activities->the_post();
                     $card_id = get_the_ID();
@@ -170,7 +169,7 @@ get_header();
                     </a>
                     <div class="fth-card-content">
                         <h3 class="fth-card-title"><a href="<?php the_permalink(); ?>"><?php the_title(); ?></a></h3>
-                        <?php if ($card_rating): ?><div class="fth-card-meta"><span><i class="fas fa-star"></i> <?php echo number_format($card_rating, 1); ?></span><?php if ($card_reviews): ?><span class="fth-card-reviews">(<?php echo number_format($card_reviews); ?>)</span><?php endif; ?></div><?php endif; ?>
+                        <?php if ($card_rating): ?><div class="fth-card-meta"><span>⭐ <?php echo number_format($card_rating, 1); ?></span><?php if ($card_reviews): ?><span class="fth-card-reviews">(<?php echo number_format($card_reviews); ?>)</span><?php endif; ?></div><?php endif; ?>
                         <div class="fth-card-footer">
                             <div><div class="fth-card-price-label">From</div><div class="fth-card-price"><?php echo $card_price ? esc_html($symbol . number_format($card_price, 2)) : 'TBD'; ?></div></div>
                             <a href="<?php echo $card_affiliate ?: get_permalink(); ?>" class="fth-card-btn" <?php echo $card_affiliate ? 'target="_blank"' : ''; ?>>Book</a>
@@ -179,7 +178,7 @@ get_header();
                 </article>
                 <?php endwhile; wp_reset_postdata(); ?>
             </div>
-            <?php if ($city_term): ?><div class="fth-view-all"><a href="<?php echo get_term_link($city_term); ?>" class="fth-view-all-btn">View All <?php echo esc_html($activity_count); ?> Activities <i class="fas fa-arrow-right"></i></a></div><?php endif; ?>
+            <?php if ($city_term): ?><div class="fth-view-all"><a href="<?php echo get_term_link($city_term); ?>" class="fth-view-all-btn">View All <?php echo esc_html($activity_count); ?> Activities →</a></div><?php endif; ?>
         </section>
         <?php endif; ?>
         
@@ -187,7 +186,7 @@ get_header();
         <div class="fth-cta-banner">
             <h2>Explore All <?php the_title(); ?> Experiences</h2>
             <p>Discover more tours, tickets, and activities</p>
-            <a href="<?php echo esc_url($deeplink); ?>" class="fth-btn" target="_blank" rel="noopener noreferrer">View All Activities <i class="fas fa-external-link-alt"></i></a>
+            <a href="<?php echo esc_url($deeplink); ?>" class="fth-btn" target="_blank" rel="noopener noreferrer">View All Activities ↗</a>
         </div>
         <?php endif; ?>
     </main>

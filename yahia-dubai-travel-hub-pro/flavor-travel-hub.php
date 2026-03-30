@@ -2,8 +2,8 @@
 /**
  * Plugin Name: Yahia Dubai Travel Hub Pro
  * Plugin URI: https://flavor.ae/
- * Description: Yahia Dubai travel hub – attractions, tours and hotels imported from Klook with affiliate links, full AIOSEO automation, Klook-style design and WP Residence-safe templates. v1.23
- * Version: 1.23.0
+ * Description: Yahia Dubai travel hub – attractions, tours and hotels imported from Klook with affiliate links, full AIOSEO automation, Klook-style design and WP Residence-safe templates. v1.24
+ * Version: 1.24.0
  * Author: Flavor
  * Author URI: https://flavor.ae/
  * Text Domain: flavor-travel-hub
@@ -20,7 +20,7 @@ if (!defined('ABSPATH')) {
 }
 
 // Plugin constants
-define('FTH_VERSION', '1.23.0');
+define('FTH_VERSION', '1.24.0');
 define('FTH_PLUGIN_DIR', plugin_dir_path(__FILE__));
 define('FTH_PLUGIN_URL', plugin_dir_url(__FILE__));
 define('FTH_PLUGIN_BASENAME', plugin_basename(__FILE__));
@@ -148,10 +148,10 @@ final class Flavor_Travel_Hub {
     public function maybe_create_missing_pages() {
         if (is_admin() || wp_doing_ajax()) {
             $needs = false;
-            foreach (array('things-to-do' => '[fth_travel_hub]', 'hotels' => '[fth_hotels_hub]') as $slug => $shortcode) {
+            foreach (array('things-to-do' => '[fth_travel_hub]', 'hotels' => '[fth_hotels_hub]', 'passes' => '') as $slug => $shortcode) {
                 $page = get_page_by_path($slug);
                 if (!$page) {
-                    $title = $slug === 'hotels' ? 'Worldwide Hotels' : 'Worldwide Tours & Attractions';
+                    $title = $slug === 'hotels' ? 'Worldwide Hotels' : ($slug === 'passes' ? 'Passes & Tickets — Best Attraction Passes' : 'Worldwide Tours & Attractions');
                     wp_insert_post(array(
                         'post_title'     => $title,
                         'post_name'      => $slug,
@@ -249,6 +249,32 @@ final class Flavor_Travel_Hub {
             ));
             if ($page_id && !is_wp_error($page_id)) {
                 update_option('fth_hotels_page_id', $page_id);
+            }
+        }
+
+        // Passes hub
+        $passes_page = get_page_by_path('passes');
+        if (!$passes_page) {
+            $page_id = wp_insert_post(array(
+                'post_title'     => 'Passes & Tickets — Best Attraction Passes',
+                'post_name'      => 'passes',
+                'post_content'   => '',
+                'post_status'    => 'publish',
+                'post_type'      => 'page',
+                'post_author'    => get_current_user_id(),
+                'comment_status' => 'closed',
+            ));
+            if ($page_id && !is_wp_error($page_id)) {
+                update_option('fth_passes_page_id', $page_id);
+            }
+        }
+
+        // Ensure 'passes' taxonomy term in travel_category
+        $passes_term = get_term_by('slug', 'passes', 'travel_category');
+        if (!$passes_term) {
+            $new_term = wp_insert_term('Passes', 'travel_category', array('slug' => 'passes'));
+            if (!is_wp_error($new_term)) {
+                update_term_meta($new_term['term_id'], 'fth_icon', '🎟️');
             }
         }
     }

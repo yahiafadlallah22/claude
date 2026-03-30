@@ -2108,6 +2108,34 @@ public static function import_bulk_city() {
             }
         }
 
+        // Auto-create destination page for city if none exists
+        if (!empty($params['city'])) {
+            $dest_city_id  = intval($params['city']);
+            $dest_city_obj = get_term($dest_city_id, 'travel_city');
+            if ($dest_city_obj && !is_wp_error($dest_city_obj)) {
+                $dest_city_slug = $dest_city_obj->slug;
+                $existing_dest = get_posts(array(
+                    'post_type'      => 'travel_destination',
+                    'tax_query'      => array(array('taxonomy' => 'travel_city', 'field' => 'slug', 'terms' => $dest_city_slug)),
+                    'posts_per_page' => 1,
+                    'fields'         => 'ids',
+                ));
+                if (empty($existing_dest)) {
+                    $dest_id = wp_insert_post(array(
+                        'post_title'   => $dest_city_obj->name,
+                        'post_type'    => 'travel_destination',
+                        'post_status'  => 'publish',
+                        'post_content' => '',
+                    ));
+                    if ($dest_id && !is_wp_error($dest_id)) {
+                        wp_set_post_terms($dest_id, array($dest_city_obj->term_id), 'travel_city');
+                        $hero = get_term_meta($dest_city_obj->term_id, 'fth_hero_image', true);
+                        if ($hero) update_post_meta($dest_id, '_fth_hero_image', $hero);
+                    }
+                }
+            }
+        }
+
         // Auto-detect category from Klook data if not manually selected
         if (empty($params['category']) && !empty($data['klook_categories'])) {
             foreach ($data['klook_categories'] as $cat_name) {
