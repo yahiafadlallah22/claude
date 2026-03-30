@@ -501,10 +501,10 @@ private static function fetch_klook_html($url) {
     $r = self::remote_get($url, array('timeout' => 30));
     if (!is_wp_error($r)) {
         $b = wp_remote_retrieve_body($r);
-        if (!empty($b) && strpos($b, '__NEXT_DATA__') !== false) {
+        if (!$is_error_body($b) && strpos($b, '__NEXT_DATA__') !== false) {
             return array('body' => $b, 'url' => $url, 'source' => 'direct');
         }
-        if (!empty($b) && empty($best_body)) $best_body = $b;
+        if (!$is_error_body($b) && !empty($b) && empty($best_body)) $best_body = $b;
     }
 
     // ── 5. Without /en-US/ locale ─────────────────────────────────────────────
@@ -513,38 +513,42 @@ private static function fetch_klook_html($url) {
         $r2 = self::remote_get($url_nl, array('timeout' => 25));
         if (!is_wp_error($r2)) {
             $b2 = wp_remote_retrieve_body($r2);
-            if (!empty($b2) && strpos($b2, '__NEXT_DATA__') !== false) {
+            if (!$is_error_body($b2) && strpos($b2, '__NEXT_DATA__') !== false) {
                 return array('body' => $b2, 'url' => $url_nl, 'source' => 'direct_noloc');
             }
+            if (!$is_error_body($b2) && !empty($b2) && empty($best_body)) $best_body = $b2;
         }
     }
 
-    // ── 6. Wayback Machine CDX API (up to 3 timestamps, 3 years back) ─────────
-    $url_bare = preg_replace('#^https?://#', '', rtrim($url, '/'));
-    $cdx_q    = http_build_query(array(
-        'url'    => $url_bare,
-        'output' => 'json',
-        'fl'     => 'timestamp',
-        'limit'  => 3,
-        'from'   => date('Ymd', strtotime('-3 years')),
-        'to'     => date('Ymd'),
-        'filter' => 'statuscode:200',
-    ));
-    $cdx_r = self::remote_get('https://web.archive.org/cdx/search/cdx?' . $cdx_q, array('timeout' => 25));
-    if (!is_wp_error($cdx_r)) {
+    // ── 6. Wayback Machine CDX API (up to 5 timestamps, 5 years back) ─────────
+    $url_bare  = preg_replace('#^https?://#', '', rtrim($url, '/'));
+    $url_noloc = preg_replace('#/en-US/#', '/', $url_bare); // also try without locale in CDX
+    $wb_tried  = array();
+    foreach (array($url_bare, $url_noloc) as $_wb_url) {
+        if (in_array($_wb_url, $wb_tried, true)) continue;
+        $wb_tried[] = $_wb_url;
+        $cdx_q = http_build_query(array(
+            'url'    => $_wb_url,
+            'output' => 'json',
+            'fl'     => 'timestamp',
+            'limit'  => 5,
+            'from'   => date('Ymd', strtotime('-5 years')),
+            'to'     => date('Ymd'),
+        ));
+        $cdx_r = self::remote_get('https://web.archive.org/cdx/search/cdx?' . $cdx_q, array('timeout' => 25));
+        if (is_wp_error($cdx_r)) continue;
         $rows = json_decode(wp_remote_retrieve_body($cdx_r), true);
-        if (is_array($rows) && count($rows) >= 2) {
-            foreach (array_slice($rows, 1) as $row) {
-                if (!isset($row[0])) continue;
-                $wb_url = 'https://web.archive.org/web/' . $row[0] . 'if_/' . $url;
-                $wb_r   = self::remote_get($wb_url, array('timeout' => 60));
-                if (!is_wp_error($wb_r)) {
-                    $wb_b = wp_remote_retrieve_body($wb_r);
-                    if (!empty($wb_b) && strpos($wb_b, '__NEXT_DATA__') !== false) {
-                        return array('body' => $wb_b, 'url' => $url, 'source' => 'wayback_cdx');
-                    }
-                    if (!empty($wb_b) && empty($best_body)) $best_body = $wb_b;
+        if (!is_array($rows) || count($rows) < 2) continue;
+        foreach (array_slice($rows, 1) as $row) {
+            if (!isset($row[0])) continue;
+            $wb_url = 'https://web.archive.org/web/' . $row[0] . 'if_/' . $url;
+            $wb_r   = self::remote_get($wb_url, array('timeout' => 60));
+            if (!is_wp_error($wb_r)) {
+                $wb_b = wp_remote_retrieve_body($wb_r);
+                if (!$is_error_body($wb_b) && strpos($wb_b, '__NEXT_DATA__') !== false) {
+                    return array('body' => $wb_b, 'url' => $url, 'source' => 'wayback_cdx');
                 }
+                if (!$is_error_body($wb_b) && !empty($wb_b) && empty($best_body)) $best_body = $wb_b;
             }
         }
     }
@@ -559,10 +563,10 @@ private static function fetch_klook_html($url) {
             $snap_r   = self::remote_get($snap_raw, array('timeout' => 60));
             if (!is_wp_error($snap_r)) {
                 $snap_b = wp_remote_retrieve_body($snap_r);
-                if (!empty($snap_b) && strpos($snap_b, '__NEXT_DATA__') !== false) {
+                if (!$is_error_body($snap_b) && strpos($snap_b, '__NEXT_DATA__') !== false) {
                     return array('body' => $snap_b, 'url' => $url, 'source' => 'wayback_avail');
                 }
-                if (!empty($snap_b) && empty($best_body)) $best_body = $snap_b;
+                if (!$is_error_body($snap_b) && !empty($snap_b) && empty($best_body)) $best_body = $snap_b;
             }
         }
     }
