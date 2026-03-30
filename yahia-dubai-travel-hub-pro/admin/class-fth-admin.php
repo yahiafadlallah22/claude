@@ -671,16 +671,23 @@ class FTH_Admin {
             wp_send_json_error(array('message' => 'Nothing selected.'));
         }
 
+        // Extend PHP execution time for large datasets
+        if (function_exists('set_time_limit')) @set_time_limit(600);
+        if (function_exists('ignore_user_abort')) @ignore_user_abort(true);
+
         $post_types = array();
         if ($do_activities) $post_types[] = 'travel_activity';
         if ($do_hotels)     $post_types[] = 'travel_hotel';
 
-        $posts = get_posts(array(
-            'post_type'      => $post_types,
-            'post_status'    => 'any',
-            'posts_per_page' => -1,
-            'fields'         => 'ids',
-        ));
+        $posts = array();
+        if (!empty($post_types)) {
+            $posts = get_posts(array(
+                'post_type'      => $post_types,
+                'post_status'    => 'any',
+                'posts_per_page' => -1,
+                'fields'         => 'ids',
+            ));
+        }
 
         $deleted = 0;
         $media_deleted = 0;
@@ -1119,6 +1126,64 @@ class FTH_Admin {
                     <button type="button" id="fth_delete_all_btn" class="button" style="background:#fff;color:#7f1d1d;border:none;padding:12px 30px;font-size:16px;font-weight:700;border-radius:6px;cursor:pointer;">🗑️ Delete Selected Content</button>
                     <div id="fth_delete_all_status" style="margin-top:14px;padding:10px 14px;border-radius:6px;display:none;"></div>
                 </div>
+                <script>
+                (function() {
+                    var btn    = document.getElementById('fth_delete_all_btn');
+                    var status = document.getElementById('fth_delete_all_status');
+                    var nonce  = '<?php echo wp_create_nonce('fth_import_publish'); ?>';
+                    if (!btn) return;
+                    btn.addEventListener('click', function() {
+                        var doAct   = document.getElementById('fth_delete_activities')  && document.getElementById('fth_delete_activities').checked;
+                        var doHtl   = document.getElementById('fth_delete_hotels')       && document.getElementById('fth_delete_hotels').checked;
+                        var doDest  = document.getElementById('fth_delete_destinations') && document.getElementById('fth_delete_destinations').checked;
+                        var doTerms = document.getElementById('fth_delete_terms')        && document.getElementById('fth_delete_terms').checked;
+                        var doMedia = document.getElementById('fth_delete_media')        && document.getElementById('fth_delete_media').checked;
+                        if (!doAct && !doHtl && !doDest && !doTerms) {
+                            status.style.background = 'rgba(244,67,54,0.3)';
+                            status.textContent = 'Veuillez sélectionner au moins un type de contenu à effacer.';
+                            status.style.display = '';
+                            return;
+                        }
+                        var parts = [];
+                        if (doAct)   parts.push('toutes les activités');
+                        if (doHtl)   parts.push('tous les hôtels');
+                        if (doDest)  parts.push('toutes les destinations');
+                        if (doTerms) parts.push('toutes les villes/pays/catégories');
+                        if (doMedia) parts.push('les images importées');
+                        if (!confirm('⚠️ SUPPRESSION DÉFINITIVE\n\n' + parts.join(', ') + '\n\nCette action est irréversible. Confirmer ?')) return;
+                        btn.disabled = true; btn.textContent = '⏳ Suppression en cours…';
+                        status.style.background = 'rgba(255,255,255,0.15)';
+                        status.textContent = 'Suppression en cours — veuillez patienter…';
+                        status.style.display = '';
+                        var fd = new FormData();
+                        fd.append('action',       'fth_delete_all_content');
+                        fd.append('activities',   doAct   ? '1' : '0');
+                        fd.append('hotels',       doHtl   ? '1' : '0');
+                        fd.append('destinations', doDest  ? '1' : '0');
+                        fd.append('terms',        doTerms ? '1' : '0');
+                        fd.append('media',        doMedia ? '1' : '0');
+                        fd.append('nonce',        nonce);
+                        fetch(ajaxurl, {method:'POST', body:fd, credentials:'same-origin'})
+                            .then(function(r){ return r.json(); })
+                            .then(function(res) {
+                                if (res && res.success) {
+                                    status.style.background = 'rgba(76,175,80,0.3)';
+                                    status.textContent = '✅ ' + res.data.message;
+                                } else {
+                                    status.style.background = 'rgba(244,67,54,0.3)';
+                                    status.textContent = '❌ ' + (res && res.data && res.data.message ? res.data.message : 'Erreur inconnue');
+                                }
+                            })
+                            .catch(function(e) {
+                                status.style.background = 'rgba(244,67,54,0.3)';
+                                status.textContent = '❌ Erreur réseau: ' + e.message;
+                            })
+                            .finally(function() {
+                                btn.disabled = false; btn.textContent = '🗑️ Delete Selected Content';
+                            });
+                    });
+                })();
+                </script>
 
                 <!-- Batch URL import -->
                 <div class="fth-import-panel" style="background: linear-gradient(135deg, #7c3aed 0%, #db2777 100%); color: #fff; padding: 30px; border-radius: 12px; margin-bottom: 30px;">
@@ -1688,60 +1753,7 @@ class FTH_Admin {
             });
         });
 
-        // ── Delete All Content ────────────────────────────────────────────────────
-        $('#fth_delete_all_btn').on('click', function() {
-            var doActivities   = $('#fth_delete_activities').is(':checked');
-            var doHotels       = $('#fth_delete_hotels').is(':checked');
-            var doDestinations = $('#fth_delete_destinations').is(':checked');
-            var doTerms        = $('#fth_delete_terms').is(':checked');
-            var doMedia        = $('#fth_delete_media').is(':checked');
-            var $btn    = $(this);
-            var $status = $('#fth_delete_all_status');
-
-            if (!doActivities && !doHotels && !doDestinations && !doTerms) {
-                $status.css('background','rgba(244,67,54,0.3)').text('Select at least one content type to delete.').show();
-                return;
-            }
-            var types = [];
-            if (doActivities)   types.push('activities');
-            if (doHotels)       types.push('hotels');
-            if (doDestinations) types.push('destinations');
-            if (doTerms)        types.push('taxonomy terms');
-            var label = types.join(' and ');
-            if (!confirm('⚠️ This will permanently delete all ' + label + (doMedia ? ' and their images' : '') + '. This cannot be undone.\n\nAre you sure?')) return;
-
-            $btn.prop('disabled', true).text('Deleting...');
-            $status.css('background','rgba(255,255,255,0.2)').text('Deleting content... please wait.').show();
-
-            $.ajax({
-                url: ajaxurl,
-                type: 'POST',
-                timeout: 300000,
-                data: {
-                    action:        'fth_delete_all_content',
-                    activities:    doActivities   ? 1 : 0,
-                    hotels:        doHotels       ? 1 : 0,
-                    destinations:  doDestinations ? 1 : 0,
-                    terms:         doTerms        ? 1 : 0,
-                    media:         doMedia        ? 1 : 0,
-                    nonce: '<?php echo wp_create_nonce('fth_import_publish'); ?>'
-                },
-                success: function(res) {
-                    if (res.success) {
-                        $status.css('background','rgba(76,175,80,0.3)').text('✅ ' + res.data.message).show();
-                    } else {
-                        $status.css('background','rgba(244,67,54,0.3)').text('❌ ' + (res.data ? res.data.message : 'Delete failed')).show();
-                    }
-                },
-                error: function(xhr) {
-                    var msg = 'Network error';
-                    if (xhr && xhr.responseJSON && xhr.responseJSON.data && xhr.responseJSON.data.message) msg = xhr.responseJSON.data.message;
-                    else if (xhr && xhr.responseText) msg = xhr.responseText.substring(0, 240);
-                    $status.css('background','rgba(244,67,54,0.3)').text('❌ ' + msg).show();
-                },
-                complete: function() { $btn.prop('disabled', false).text('🗑️ Delete Selected Content'); }
-            });
-        });
+        // Delete button handled by inline vanilla-JS block injected next to the button HTML.
 
 // ── Marathon Import ──────────────────────────────────────────────────
 var fthMarathonNonce = '<?php echo wp_create_nonce('fth_import_publish'); ?>';
