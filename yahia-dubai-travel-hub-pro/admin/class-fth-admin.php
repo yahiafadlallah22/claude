@@ -149,6 +149,16 @@ class FTH_Admin {
             'fth-settings',
             array('FTH_Admin_Settings', 'settings_page')
         );
+
+        // Klook Links Library
+        add_submenu_page(
+            'fth-travel-hub',
+            'Klook Links Library',
+            '🔗 Klook Links',
+            'edit_posts',
+            'fth-klook-links',
+            array(__CLASS__, 'klook_links_page')
+        );
     }
     
     /**
@@ -1635,6 +1645,26 @@ class FTH_Admin {
         });
 
 // ── Marathon Import ──────────────────────────────────────────────────
+// Auto-prefill from Klook Links Library
+(function() {
+    var p = new URLSearchParams(window.location.search);
+    if (p.get('fthll_prefill_url')) {
+        var u = p.get('fthll_prefill_url');
+        var tp = p.get('fthll_prefill_type') || 'activity';
+        var city = p.get('fthll_prefill_city') || '';
+        var country = p.get('fthll_prefill_country') || '';
+        $(document).ready(function() {
+            $('#fth_marathon_url').val(u);
+            if (tp && $('#fth_marathon_type option[value="'+tp+'"]').length) $('#fth_marathon_type').val(tp);
+            if (city) { var $co = $('#fth_marathon_city option'); $co.filter(function(){ return $(this).val().toLowerCase() === city; }).prop('selected', true); }
+            if (country) { var $co2 = $('#fth_marathon_country option'); $co2.filter(function(){ return $(this).val().toLowerCase() === country; }).prop('selected', true); }
+            // scroll to marathon panel
+            var $panel = $('#fth_marathon_url').closest('div[style]');
+            if ($panel.length) $('html,body').animate({scrollTop: $panel.offset().top - 40}, 500);
+        });
+    }
+})();
+
 var fthMarathonStop = false;
 
 $('#fth_marathon_btn').on('click', function() {
@@ -1741,6 +1771,500 @@ $('#fth_marathon_btn').on('click', function() {
 });
 
 $('#fth_marathon_stop').on('click', function() { fthMarathonStop = true; $(this).hide(); });
+        </script>
+        <?php
+    }
+
+    // ─────────────────────────────────────────────────────────────
+    // KLOOK LINKS LIBRARY
+    // ─────────────────────────────────────────────────────────────
+    public static function klook_links_page() {
+        // ── Comprehensive city database ──────────────────────────
+        // Format: 'Region' => array( array('City Name', 'Country', 'activities-slug', 'hotels-slug') )
+        // Slugs match Klook URL patterns:
+        //   Activities: https://www.klook.com/en-US/things-to-do/{activities-slug}/
+        //   Hotels    : https://www.klook.com/en-US/hotels/{hotels-slug}/
+        $klook_cities = array(
+
+            'Middle East' => array(
+                array('Dubai',          'UAE',          'dubai-city-things-to-do',         'dubai-hotel'),
+                array('Abu Dhabi',      'UAE',          'abu-dhabi-things-to-do',           'abu-dhabi-hotel'),
+                array('Sharjah',        'UAE',          'sharjah-things-to-do',             'sharjah-hotel'),
+                array('Doha',           'Qatar',        'doha-things-to-do',                'doha-hotel'),
+                array('Riyadh',         'Saudi Arabia', 'riyadh-things-to-do',              'riyadh-hotel'),
+                array('Jeddah',         'Saudi Arabia', 'jeddah-things-to-do',              'jeddah-hotel'),
+                array('Mecca',          'Saudi Arabia', 'mecca-things-to-do',               'mecca-hotel'),
+                array('Medina',         'Saudi Arabia', 'medina-things-to-do',              'medina-hotel'),
+                array('Kuwait City',    'Kuwait',       'kuwait-city-things-to-do',         'kuwait-city-hotel'),
+                array('Muscat',         'Oman',         'muscat-things-to-do',              'muscat-hotel'),
+                array('Salalah',        'Oman',         'salalah-things-to-do',             'salalah-hotel'),
+                array('Manama',         'Bahrain',      'manama-things-to-do',              'manama-hotel'),
+                array('Amman',          'Jordan',       'amman-things-to-do',               'amman-hotel'),
+                array('Petra',          'Jordan',       'petra-things-to-do',               'petra-hotel'),
+                array('Beirut',         'Lebanon',      'beirut-things-to-do',              'beirut-hotel'),
+                array('Tel Aviv',       'Israel',       'tel-aviv-things-to-do',            'tel-aviv-hotel'),
+                array('Jerusalem',      'Israel',       'jerusalem-things-to-do',           'jerusalem-hotel'),
+                array('Istanbul',       'Turkey',       'istanbul-things-to-do',            'istanbul-hotel'),
+                array('Ankara',         'Turkey',       'ankara-things-to-do',              'ankara-hotel'),
+                array('Antalya',        'Turkey',       'antalya-things-to-do',             'antalya-hotel'),
+                array('Cappadocia',     'Turkey',       'cappadocia-things-to-do',          'cappadocia-hotel'),
+                array('Bodrum',         'Turkey',       'bodrum-things-to-do',              'bodrum-hotel'),
+                array('Tbilisi',        'Georgia',      'tbilisi-things-to-do',             'tbilisi-hotel'),
+                array('Batumi',         'Georgia',      'batumi-things-to-do',              'batumi-hotel'),
+                array('Yerevan',        'Armenia',      'yerevan-things-to-do',             'yerevan-hotel'),
+                array('Baku',           'Azerbaijan',   'baku-things-to-do',                'baku-hotel'),
+            ),
+
+            'Africa — North' => array(
+                array('Cairo',          'Egypt',        'cairo-things-to-do',               'cairo-hotel'),
+                array('Alexandria',     'Egypt',        'alexandria-things-to-do',          'alexandria-hotel'),
+                array('Luxor',          'Egypt',        'luxor-things-to-do',               'luxor-hotel'),
+                array('Hurghada',       'Egypt',        'hurghada-things-to-do',            'hurghada-hotel'),
+                array('Sharm el-Sheikh','Egypt',        'sharm-el-sheikh-things-to-do',     'sharm-el-sheikh-hotel'),
+                array('Marrakech',      'Morocco',      'marrakech-things-to-do',           'marrakech-hotel'),
+                array('Casablanca',     'Morocco',      'casablanca-things-to-do',          'casablanca-hotel'),
+                array('Fez',            'Morocco',      'fez-things-to-do',                 'fez-hotel'),
+                array('Tangier',        'Morocco',      'tangier-things-to-do',             'tangier-hotel'),
+                array('Agadir',         'Morocco',      'agadir-things-to-do',              'agadir-hotel'),
+                array('Chefchaouen',    'Morocco',      'chefchaouen-things-to-do',         'chefchaouen-hotel'),
+                array('Essaouira',      'Morocco',      'essaouira-things-to-do',           'essaouira-hotel'),
+                array('Rabat',          'Morocco',      'rabat-things-to-do',               'rabat-hotel'),
+                array('Meknes',         'Morocco',      'meknes-things-to-do',              'meknes-hotel'),
+                array('Tunis',          'Tunisia',      'tunis-things-to-do',               'tunis-hotel'),
+                array('Djerba',         'Tunisia',      'djerba-things-to-do',              'djerba-hotel'),
+                array('Hammamet',       'Tunisia',      'hammamet-things-to-do',            'hammamet-hotel'),
+                array('Algiers',        'Algeria',      'algiers-things-to-do',             'algiers-hotel'),
+                array('Tripoli',        'Libya',        'tripoli-things-to-do',             'tripoli-hotel'),
+            ),
+
+            'Africa — Sub-Saharan' => array(
+                array('Cape Town',      'South Africa', 'cape-town-things-to-do',           'cape-town-hotel'),
+                array('Johannesburg',   'South Africa', 'johannesburg-things-to-do',        'johannesburg-hotel'),
+                array('Durban',         'South Africa', 'durban-things-to-do',              'durban-hotel'),
+                array('Pretoria',       'South Africa', 'pretoria-things-to-do',            'pretoria-hotel'),
+                array('Nairobi',        'Kenya',        'nairobi-things-to-do',             'nairobi-hotel'),
+                array('Mombasa',        'Kenya',        'mombasa-things-to-do',             'mombasa-hotel'),
+                array('Zanzibar',       'Tanzania',     'zanzibar-things-to-do',            'zanzibar-hotel'),
+                array('Dar es Salaam',  'Tanzania',     'dar-es-salaam-things-to-do',       'dar-es-salaam-hotel'),
+                array('Accra',          'Ghana',        'accra-things-to-do',               'accra-hotel'),
+                array('Lagos',          'Nigeria',      'lagos-things-to-do',               'lagos-hotel'),
+                array('Abuja',          'Nigeria',      'abuja-things-to-do',               'abuja-hotel'),
+                array('Addis Ababa',    'Ethiopia',     'addis-ababa-things-to-do',         'addis-ababa-hotel'),
+                array('Kigali',         'Rwanda',       'kigali-things-to-do',              'kigali-hotel'),
+                array('Kampala',        'Uganda',       'kampala-things-to-do',             'kampala-hotel'),
+                array('Dakar',          'Senegal',      'dakar-things-to-do',               'dakar-hotel'),
+                array('Antananarivo',   'Madagascar',   'antananarivo-things-to-do',        'antananarivo-hotel'),
+                array('Mauritius',      'Mauritius',    'mauritius-things-to-do',           'mauritius-hotel'),
+                array('Seychelles',     'Seychelles',   'seychelles-things-to-do',          'seychelles-hotel'),
+            ),
+
+            'Europe — West' => array(
+                array('Paris',          'France',       'paris-things-to-do',               'paris-hotel'),
+                array('Nice',           'France',       'nice-things-to-do',                'nice-hotel'),
+                array('Lyon',           'France',       'lyon-things-to-do',                'lyon-hotel'),
+                array('Marseille',      'France',       'marseille-things-to-do',           'marseille-hotel'),
+                array('Bordeaux',       'France',       'bordeaux-things-to-do',            'bordeaux-hotel'),
+                array('Strasbourg',     'France',       'strasbourg-things-to-do',          'strasbourg-hotel'),
+                array('London',         'UK',           'london-things-to-do',              'london-hotel'),
+                array('Edinburgh',      'UK',           'edinburgh-things-to-do',           'edinburgh-hotel'),
+                array('Manchester',     'UK',           'manchester-things-to-do',          'manchester-hotel'),
+                array('Dublin',         'Ireland',      'dublin-things-to-do',              'dublin-hotel'),
+                array('Amsterdam',      'Netherlands',  'amsterdam-things-to-do',           'amsterdam-hotel'),
+                array('Brussels',       'Belgium',      'brussels-things-to-do',            'brussels-hotel'),
+                array('Bruges',         'Belgium',      'bruges-things-to-do',              'bruges-hotel'),
+                array('Lisbon',         'Portugal',     'lisbon-things-to-do',              'lisbon-hotel'),
+                array('Porto',          'Portugal',     'porto-things-to-do',               'porto-hotel'),
+                array('Algarve',        'Portugal',     'algarve-things-to-do',             'algarve-hotel'),
+                array('Madrid',         'Spain',        'madrid-things-to-do',              'madrid-hotel'),
+                array('Barcelona',      'Spain',        'barcelona-things-to-do',           'barcelona-hotel'),
+                array('Seville',        'Spain',        'seville-things-to-do',             'seville-hotel'),
+                array('Valencia',       'Spain',        'valencia-things-to-do',            'valencia-hotel'),
+                array('Malaga',         'Spain',        'malaga-things-to-do',              'malaga-hotel'),
+                array('Ibiza',          'Spain',        'ibiza-things-to-do',               'ibiza-hotel'),
+                array('Tenerife',       'Spain',        'tenerife-things-to-do',            'tenerife-hotel'),
+                array('Zurich',         'Switzerland',  'zurich-things-to-do',              'zurich-hotel'),
+                array('Geneva',         'Switzerland',  'geneva-things-to-do',              'geneva-hotel'),
+                array('Interlaken',     'Switzerland',  'interlaken-things-to-do',          'interlaken-hotel'),
+                array('Bern',           'Switzerland',  'bern-things-to-do',                'bern-hotel'),
+            ),
+
+            'Europe — Central & East' => array(
+                array('Berlin',         'Germany',      'berlin-things-to-do',              'berlin-hotel'),
+                array('Munich',         'Germany',      'munich-things-to-do',              'munich-hotel'),
+                array('Hamburg',        'Germany',      'hamburg-things-to-do',             'hamburg-hotel'),
+                array('Frankfurt',      'Germany',      'frankfurt-things-to-do',           'frankfurt-hotel'),
+                array('Cologne',        'Germany',      'cologne-things-to-do',             'cologne-hotel'),
+                array('Vienna',         'Austria',      'vienna-things-to-do',              'vienna-hotel'),
+                array('Salzburg',       'Austria',      'salzburg-things-to-do',            'salzburg-hotel'),
+                array('Prague',         'Czech Rep.',   'prague-things-to-do',              'prague-hotel'),
+                array('Budapest',       'Hungary',      'budapest-things-to-do',            'budapest-hotel'),
+                array('Warsaw',         'Poland',       'warsaw-things-to-do',              'warsaw-hotel'),
+                array('Krakow',         'Poland',       'krakow-things-to-do',              'krakow-hotel'),
+                array('Gdansk',         'Poland',       'gdansk-things-to-do',              'gdansk-hotel'),
+                array('Bratislava',     'Slovakia',     'bratislava-things-to-do',          'bratislava-hotel'),
+                array('Ljubljana',      'Slovenia',     'ljubljana-things-to-do',           'ljubljana-hotel'),
+                array('Zagreb',         'Croatia',      'zagreb-things-to-do',              'zagreb-hotel'),
+                array('Dubrovnik',      'Croatia',      'dubrovnik-things-to-do',           'dubrovnik-hotel'),
+                array('Split',          'Croatia',      'split-things-to-do',               'split-hotel'),
+                array('Sarajevo',       'Bosnia',       'sarajevo-things-to-do',            'sarajevo-hotel'),
+                array('Belgrade',       'Serbia',       'belgrade-things-to-do',            'belgrade-hotel'),
+                array('Bucharest',      'Romania',      'bucharest-things-to-do',           'bucharest-hotel'),
+                array('Sofia',          'Bulgaria',     'sofia-things-to-do',               'sofia-hotel'),
+                array('Kyiv',           'Ukraine',      'kyiv-things-to-do',                'kyiv-hotel'),
+                array('Moscow',         'Russia',       'moscow-things-to-do',              'moscow-hotel'),
+                array('St. Petersburg', 'Russia',       'saint-petersburg-things-to-do',    'saint-petersburg-hotel'),
+            ),
+
+            'Europe — North & South' => array(
+                array('Copenhagen',     'Denmark',      'copenhagen-things-to-do',          'copenhagen-hotel'),
+                array('Stockholm',      'Sweden',       'stockholm-things-to-do',           'stockholm-hotel'),
+                array('Oslo',           'Norway',       'oslo-things-to-do',                'oslo-hotel'),
+                array('Bergen',         'Norway',       'bergen-things-to-do',              'bergen-hotel'),
+                array('Helsinki',       'Finland',      'helsinki-things-to-do',            'helsinki-hotel'),
+                array('Tallinn',        'Estonia',      'tallinn-things-to-do',             'tallinn-hotel'),
+                array('Riga',           'Latvia',       'riga-things-to-do',                'riga-hotel'),
+                array('Vilnius',        'Lithuania',    'vilnius-things-to-do',             'vilnius-hotel'),
+                array('Reykjavik',      'Iceland',      'reykjavik-things-to-do',           'reykjavik-hotel'),
+                array('Athens',         'Greece',       'athens-things-to-do',              'athens-hotel'),
+                array('Santorini',      'Greece',       'santorini-things-to-do',           'santorini-hotel'),
+                array('Mykonos',        'Greece',       'mykonos-things-to-do',             'mykonos-hotel'),
+                array('Thessaloniki',   'Greece',       'thessaloniki-things-to-do',        'thessaloniki-hotel'),
+                array('Rome',           'Italy',        'rome-things-to-do',                'rome-hotel'),
+                array('Milan',          'Italy',        'milan-things-to-do',               'milan-hotel'),
+                array('Florence',       'Italy',        'florence-things-to-do',            'florence-hotel'),
+                array('Venice',         'Italy',        'venice-things-to-do',              'venice-hotel'),
+                array('Naples',         'Italy',        'naples-things-to-do',              'naples-hotel'),
+                array('Amalfi Coast',   'Italy',        'amalfi-coast-things-to-do',        'amalfi-coast-hotel'),
+                array('Sicily',         'Italy',        'sicily-things-to-do',              'sicily-hotel'),
+            ),
+
+            'Asia — East' => array(
+                array('Tokyo',          'Japan',        'tokyo-things-to-do',               'tokyo-hotel'),
+                array('Kyoto',          'Japan',        'kyoto-things-to-do',               'kyoto-hotel'),
+                array('Osaka',          'Japan',        'osaka-things-to-do',               'osaka-hotel'),
+                array('Hiroshima',      'Japan',        'hiroshima-things-to-do',           'hiroshima-hotel'),
+                array('Nara',           'Japan',        'nara-things-to-do',                'nara-hotel'),
+                array('Hokkaido',       'Japan',        'hokkaido-things-to-do',            'hokkaido-hotel'),
+                array('Okinawa',        'Japan',        'okinawa-things-to-do',             'okinawa-hotel'),
+                array('Seoul',          'South Korea',  'seoul-things-to-do',               'seoul-hotel'),
+                array('Busan',          'South Korea',  'busan-things-to-do',               'busan-hotel'),
+                array('Jeju',           'South Korea',  'jeju-things-to-do',                'jeju-hotel'),
+                array('Beijing',        'China',        'beijing-things-to-do',             'beijing-hotel'),
+                array('Shanghai',       'China',        'shanghai-things-to-do',            'shanghai-hotel'),
+                array('Guangzhou',      'China',        'guangzhou-things-to-do',           'guangzhou-hotel'),
+                array('Shenzhen',       'China',        'shenzhen-things-to-do',            'shenzhen-hotel'),
+                array('Chengdu',        'China',        'chengdu-things-to-do',             'chengdu-hotel'),
+                array("Xi'an",          'China',        'xian-things-to-do',                'xian-hotel'),
+                array('Guilin',         'China',        'guilin-things-to-do',              'guilin-hotel'),
+                array('Zhangjiajie',    'China',        'zhangjiajie-things-to-do',         'zhangjiajie-hotel'),
+                array('Chongqing',      'China',        'chongqing-things-to-do',           'chongqing-hotel'),
+                array('Sanya',          'China',        'sanya-things-to-do',               'sanya-hotel'),
+                array('Hong Kong',      'Hong Kong',    'hong-kong-things-to-do',           'hong-kong-hotel'),
+                array('Macau',          'Macau',        'macau-things-to-do',               'macau-hotel'),
+                array('Taipei',         'Taiwan',       'taipei-things-to-do',              'taipei-hotel'),
+                array('Taichung',       'Taiwan',       'taichung-things-to-do',            'taichung-hotel'),
+                array('Tainan',         'Taiwan',       'tainan-things-to-do',              'tainan-hotel'),
+            ),
+
+            'Asia — Southeast' => array(
+                array('Singapore',      'Singapore',    'singapore-things-to-do',           'singapore-hotel'),
+                array('Bangkok',        'Thailand',     'bangkok-things-to-do',             'bangkok-hotel'),
+                array('Phuket',         'Thailand',     'phuket-things-to-do',              'phuket-hotel'),
+                array('Chiang Mai',     'Thailand',     'chiang-mai-things-to-do',          'chiang-mai-hotel'),
+                array('Krabi',          'Thailand',     'krabi-things-to-do',               'krabi-hotel'),
+                array('Koh Samui',      'Thailand',     'koh-samui-things-to-do',           'koh-samui-hotel'),
+                array('Pattaya',        'Thailand',     'pattaya-things-to-do',             'pattaya-hotel'),
+                array('Hua Hin',        'Thailand',     'hua-hin-things-to-do',             'hua-hin-hotel'),
+                array('Bali',           'Indonesia',    'bali-things-to-do',                'bali-hotel'),
+                array('Jakarta',        'Indonesia',    'jakarta-things-to-do',             'jakarta-hotel'),
+                array('Yogyakarta',     'Indonesia',    'yogyakarta-things-to-do',          'yogyakarta-hotel'),
+                array('Lombok',         'Indonesia',    'lombok-things-to-do',              'lombok-hotel'),
+                array('Komodo',         'Indonesia',    'komodo-things-to-do',              'komodo-hotel'),
+                array('Kuala Lumpur',   'Malaysia',     'kuala-lumpur-things-to-do',        'kuala-lumpur-hotel'),
+                array('Penang',         'Malaysia',     'penang-things-to-do',              'penang-hotel'),
+                array('Langkawi',       'Malaysia',     'langkawi-things-to-do',            'langkawi-hotel'),
+                array('Kota Kinabalu',  'Malaysia',     'kota-kinabalu-things-to-do',       'kota-kinabalu-hotel'),
+                array('Hanoi',          'Vietnam',      'hanoi-things-to-do',               'hanoi-hotel'),
+                array('Ho Chi Minh',    'Vietnam',      'ho-chi-minh-city-things-to-do',    'ho-chi-minh-city-hotel'),
+                array('Da Nang',        'Vietnam',      'da-nang-things-to-do',             'da-nang-hotel'),
+                array('Hoi An',         'Vietnam',      'hoi-an-things-to-do',              'hoi-an-hotel'),
+                array('Ha Long Bay',    'Vietnam',      'ha-long-bay-things-to-do',         'ha-long-bay-hotel'),
+                array('Manila',         'Philippines',  'manila-things-to-do',              'manila-hotel'),
+                array('Boracay',        'Philippines',  'boracay-things-to-do',             'boracay-hotel'),
+                array('Cebu',           'Philippines',  'cebu-things-to-do',                'cebu-hotel'),
+                array('Palawan',        'Philippines',  'palawan-things-to-do',             'palawan-hotel'),
+                array('Phnom Penh',     'Cambodia',     'phnom-penh-things-to-do',          'phnom-penh-hotel'),
+                array('Siem Reap',      'Cambodia',     'siem-reap-things-to-do',           'siem-reap-hotel'),
+                array('Vientiane',      'Laos',         'vientiane-things-to-do',           'vientiane-hotel'),
+                array('Luang Prabang',  'Laos',         'luang-prabang-things-to-do',       'luang-prabang-hotel'),
+                array('Yangon',         'Myanmar',      'yangon-things-to-do',              'yangon-hotel'),
+                array('Brunei',         'Brunei',       'brunei-things-to-do',              'brunei-hotel'),
+            ),
+
+            'Asia — South' => array(
+                array('Mumbai',         'India',        'mumbai-things-to-do',              'mumbai-hotel'),
+                array('Delhi',          'India',        'delhi-things-to-do',               'delhi-hotel'),
+                array('Goa',            'India',        'goa-things-to-do',                 'goa-hotel'),
+                array('Jaipur',         'India',        'jaipur-things-to-do',              'jaipur-hotel'),
+                array('Agra',           'India',        'agra-things-to-do',                'agra-hotel'),
+                array('Varanasi',       'India',        'varanasi-things-to-do',            'varanasi-hotel'),
+                array('Kerala',         'India',        'kerala-things-to-do',              'kerala-hotel'),
+                array('Chennai',        'India',        'chennai-things-to-do',             'chennai-hotel'),
+                array('Kolkata',        'India',        'kolkata-things-to-do',             'kolkata-hotel'),
+                array('Hyderabad',      'India',        'hyderabad-things-to-do',           'hyderabad-hotel'),
+                array('Bangalore',      'India',        'bangalore-things-to-do',           'bangalore-hotel'),
+                array('Maldives',       'Maldives',     'maldives-things-to-do',            'maldives-hotel'),
+                array('Colombo',        'Sri Lanka',    'colombo-things-to-do',             'colombo-hotel'),
+                array('Sigiriya',       'Sri Lanka',    'sigiriya-things-to-do',            'sigiriya-hotel'),
+                array('Kathmandu',      'Nepal',        'kathmandu-things-to-do',           'kathmandu-hotel'),
+                array('Pokhara',        'Nepal',        'pokhara-things-to-do',             'pokhara-hotel'),
+                array('Dhaka',          'Bangladesh',   'dhaka-things-to-do',               'dhaka-hotel'),
+                array('Karachi',        'Pakistan',     'karachi-things-to-do',             'karachi-hotel'),
+                array('Lahore',         'Pakistan',     'lahore-things-to-do',              'lahore-hotel'),
+                array('Islamabad',      'Pakistan',     'islamabad-things-to-do',           'islamabad-hotel'),
+            ),
+
+            'Americas — North' => array(
+                array('New York',       'USA',          'new-york-things-to-do',            'new-york-hotel'),
+                array('Los Angeles',    'USA',          'los-angeles-things-to-do',         'los-angeles-hotel'),
+                array('Miami',          'USA',          'miami-things-to-do',               'miami-hotel'),
+                array('Las Vegas',      'USA',          'las-vegas-things-to-do',           'las-vegas-hotel'),
+                array('San Francisco',  'USA',          'san-francisco-things-to-do',       'san-francisco-hotel'),
+                array('Chicago',        'USA',          'chicago-things-to-do',             'chicago-hotel'),
+                array('Orlando',        'USA',          'orlando-things-to-do',             'orlando-hotel'),
+                array('Hawaii',         'USA',          'hawaii-things-to-do',              'hawaii-hotel'),
+                array('Washington DC',  'USA',          'washington-dc-things-to-do',       'washington-dc-hotel'),
+                array('Boston',         'USA',          'boston-things-to-do',              'boston-hotel'),
+                array('Seattle',        'USA',          'seattle-things-to-do',             'seattle-hotel'),
+                array('Nashville',      'USA',          'nashville-things-to-do',           'nashville-hotel'),
+                array('New Orleans',    'USA',          'new-orleans-things-to-do',         'new-orleans-hotel'),
+                array('San Diego',      'USA',          'san-diego-things-to-do',           'san-diego-hotel'),
+                array('Denver',         'USA',          'denver-things-to-do',              'denver-hotel'),
+                array('Phoenix',        'USA',          'phoenix-things-to-do',             'phoenix-hotel'),
+                array('Toronto',        'Canada',       'toronto-things-to-do',             'toronto-hotel'),
+                array('Vancouver',      'Canada',       'vancouver-things-to-do',           'vancouver-hotel'),
+                array('Montreal',       'Canada',       'montreal-things-to-do',            'montreal-hotel'),
+                array('Quebec City',    'Canada',       'quebec-city-things-to-do',         'quebec-city-hotel'),
+                array('Calgary',        'Canada',       'calgary-things-to-do',             'calgary-hotel'),
+                array('Mexico City',    'Mexico',       'mexico-city-things-to-do',         'mexico-city-hotel'),
+                array('Cancun',         'Mexico',       'cancun-things-to-do',              'cancun-hotel'),
+                array('Playa del Carmen','Mexico',      'playa-del-carmen-things-to-do',    'playa-del-carmen-hotel'),
+                array('Tulum',          'Mexico',       'tulum-things-to-do',               'tulum-hotel'),
+                array('Los Cabos',      'Mexico',       'los-cabos-things-to-do',           'los-cabos-hotel'),
+                array('Guadalajara',    'Mexico',       'guadalajara-things-to-do',         'guadalajara-hotel'),
+            ),
+
+            'Americas — Central & Caribbean' => array(
+                array('Panama City',    'Panama',       'panama-city-things-to-do',         'panama-city-hotel'),
+                array('San José',       'Costa Rica',   'san-jose-things-to-do',            'san-jose-hotel'),
+                array('Havana',         'Cuba',         'havana-things-to-do',              'havana-hotel'),
+                array('Santo Domingo',  'Dom. Rep.',    'santo-domingo-things-to-do',       'santo-domingo-hotel'),
+                array('Punta Cana',     'Dom. Rep.',    'punta-cana-things-to-do',          'punta-cana-hotel'),
+                array('Nassau',         'Bahamas',      'nassau-things-to-do',              'nassau-hotel'),
+                array('Kingston',       'Jamaica',      'kingston-things-to-do',            'kingston-hotel'),
+                array('Bridgetown',     'Barbados',     'bridgetown-things-to-do',          'bridgetown-hotel'),
+            ),
+
+            'Americas — South' => array(
+                array('Rio de Janeiro', 'Brazil',       'rio-de-janeiro-things-to-do',      'rio-de-janeiro-hotel'),
+                array('São Paulo',      'Brazil',       'sao-paulo-things-to-do',           'sao-paulo-hotel'),
+                array('Salvador',       'Brazil',       'salvador-things-to-do',            'salvador-hotel'),
+                array('Florianopolis',  'Brazil',       'florianopolis-things-to-do',       'florianopolis-hotel'),
+                array('Buenos Aires',   'Argentina',    'buenos-aires-things-to-do',        'buenos-aires-hotel'),
+                array('Bariloche',      'Argentina',    'bariloche-things-to-do',           'bariloche-hotel'),
+                array('Santiago',       'Chile',        'santiago-things-to-do',            'santiago-hotel'),
+                array('Lima',           'Peru',         'lima-things-to-do',                'lima-hotel'),
+                array('Cusco',          'Peru',         'cusco-things-to-do',               'cusco-hotel'),
+                array('Machu Picchu',   'Peru',         'machu-picchu-things-to-do',        'machu-picchu-hotel'),
+                array('Bogota',         'Colombia',     'bogota-things-to-do',              'bogota-hotel'),
+                array('Cartagena',      'Colombia',     'cartagena-things-to-do',           'cartagena-hotel'),
+                array('Quito',          'Ecuador',      'quito-things-to-do',               'quito-hotel'),
+                array('La Paz',         'Bolivia',      'la-paz-things-to-do',              'la-paz-hotel'),
+                array('Montevideo',     'Uruguay',      'montevideo-things-to-do',          'montevideo-hotel'),
+                array('Caracas',        'Venezuela',    'caracas-things-to-do',             'caracas-hotel'),
+            ),
+
+            'Oceania' => array(
+                array('Sydney',         'Australia',    'sydney-things-to-do',              'sydney-hotel'),
+                array('Melbourne',      'Australia',    'melbourne-things-to-do',           'melbourne-hotel'),
+                array('Brisbane',       'Australia',    'brisbane-things-to-do',            'brisbane-hotel'),
+                array('Gold Coast',     'Australia',    'gold-coast-things-to-do',          'gold-coast-hotel'),
+                array('Cairns',         'Australia',    'cairns-things-to-do',              'cairns-hotel'),
+                array('Perth',          'Australia',    'perth-things-to-do',               'perth-hotel'),
+                array('Adelaide',       'Australia',    'adelaide-things-to-do',            'adelaide-hotel'),
+                array('Darwin',         'Australia',    'darwin-things-to-do',              'darwin-hotel'),
+                array('Uluru',          'Australia',    'uluru-things-to-do',               'uluru-hotel'),
+                array('Auckland',       'New Zealand',  'auckland-things-to-do',            'auckland-hotel'),
+                array('Queenstown',     'New Zealand',  'queenstown-things-to-do',          'queenstown-hotel'),
+                array('Christchurch',   'New Zealand',  'christchurch-things-to-do',        'christchurch-hotel'),
+                array('Wellington',     'New Zealand',  'wellington-things-to-do',          'wellington-hotel'),
+                array('Fiji',           'Fiji',         'fiji-things-to-do',                'fiji-hotel'),
+                array('Bora Bora',      'French Polynesia','bora-bora-things-to-do',        'bora-bora-hotel'),
+                array('Phuket',         'Thailand',     'phuket-things-to-do',              'phuket-hotel'),
+                array('Guam',           'Guam',         'guam-things-to-do',                'guam-hotel'),
+            ),
+        );
+
+        $base = 'https://www.klook.com/en-US';
+        $total_cities = 0;
+        foreach ($klook_cities as $region => $cities) $total_cities += count($cities);
+        ?>
+        <div class="wrap" style="font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif;">
+        <h1 style="display:flex;align-items:center;gap:12px;">🔗 Klook Links Library <span style="font-size:13px;font-weight:400;color:#666;background:#f0f0f1;padding:4px 10px;border-radius:20px;"><?php echo $total_cities; ?> cities</span></h1>
+        <p style="color:#555;margin-bottom:20px;">Pre-built Klook listing URLs for activities &amp; hotels. Click any link to copy it, or use the "Send to Marathon" button to auto-fill the Marathon Import.</p>
+
+        <!-- Search & Filter -->
+        <div style="display:flex;gap:10px;margin-bottom:24px;flex-wrap:wrap;align-items:center;">
+            <input type="text" id="fthll_search" placeholder="🔍 Search city or country…" style="padding:10px 14px;border:1px solid #ddd;border-radius:6px;font-size:14px;min-width:260px;">
+            <select id="fthll_region" style="padding:10px 14px;border:1px solid #ddd;border-radius:6px;font-size:14px;">
+                <option value="">All Regions</option>
+                <?php foreach (array_keys($klook_cities) as $r): ?>
+                <option value="<?php echo esc_attr($r); ?>"><?php echo esc_html($r); ?></option>
+                <?php endforeach; ?>
+            </select>
+            <select id="fthll_type" style="padding:10px 14px;border:1px solid #ddd;border-radius:6px;font-size:14px;">
+                <option value="both">Activities + Hotels</option>
+                <option value="activity">Activities only</option>
+                <option value="hotel">Hotels only</option>
+            </select>
+            <button id="fthll_copy_all" type="button" style="padding:10px 18px;background:#2575fc;color:#fff;border:none;border-radius:6px;font-size:13px;font-weight:700;cursor:pointer;">📋 Copy all visible URLs</button>
+        </div>
+
+        <!-- Results count -->
+        <div id="fthll_count" style="font-size:13px;color:#666;margin-bottom:14px;"></div>
+
+        <!-- Table -->
+        <table id="fthll_table" style="width:100%;border-collapse:collapse;background:#fff;border-radius:10px;overflow:hidden;box-shadow:0 1px 4px rgba(0,0,0,.08);">
+            <thead>
+                <tr style="background:#1e3a5f;color:#fff;font-size:13px;">
+                    <th style="padding:12px 16px;text-align:left;width:200px;">City</th>
+                    <th style="padding:12px 16px;text-align:left;width:130px;">Country</th>
+                    <th style="padding:12px 16px;text-align:left;width:110px;">Region</th>
+                    <th style="padding:12px 8px;text-align:left;">Activities URL</th>
+                    <th style="padding:12px 8px;text-align:left;">Hotels URL</th>
+                    <th style="padding:12px 16px;text-align:center;width:110px;">Actions</th>
+                </tr>
+            </thead>
+            <tbody id="fthll_tbody">
+            <?php
+            $row_idx = 0;
+            foreach ($klook_cities as $region => $cities):
+                foreach ($cities as $city_data):
+                    list($city_name, $country, $act_slug, $htl_slug) = $city_data;
+                    $act_url = $base . '/things-to-do/' . $act_slug . '/';
+                    $htl_url = $base . '/hotels/' . $htl_slug . '/';
+                    $bg = ($row_idx % 2 === 0) ? '#fff' : '#f8f9fa';
+                    $row_idx++;
+            ?>
+            <tr class="fthll-row" data-region="<?php echo esc_attr($region); ?>" data-city="<?php echo esc_attr(strtolower($city_name)); ?>" data-country="<?php echo esc_attr(strtolower($country)); ?>" style="background:<?php echo $bg; ?>;border-bottom:1px solid #eee;">
+                <td style="padding:10px 16px;font-weight:600;font-size:13px;"><?php echo esc_html($city_name); ?></td>
+                <td style="padding:10px 16px;font-size:12px;color:#555;"><?php echo esc_html($country); ?></td>
+                <td style="padding:10px 16px;font-size:11px;color:#888;"><?php echo esc_html($region); ?></td>
+                <td class="fthll-act-cell" style="padding:10px 8px;">
+                    <div style="display:flex;align-items:center;gap:6px;">
+                        <span class="fthll-url" title="<?php echo esc_attr($act_url); ?>" style="font-size:11px;color:#2575fc;font-family:monospace;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;max-width:280px;cursor:pointer;" onclick="fthllCopy(this,'<?php echo esc_js($act_url); ?>')"><?php echo esc_html($act_url); ?></span>
+                        <button type="button" class="fthll-copy-btn" data-url="<?php echo esc_attr($act_url); ?>" style="padding:3px 8px;font-size:11px;background:#e8f0fe;color:#2575fc;border:none;border-radius:4px;cursor:pointer;white-space:nowrap;flex-shrink:0;">Copy</button>
+                    </div>
+                </td>
+                <td class="fthll-htl-cell" style="padding:10px 8px;">
+                    <div style="display:flex;align-items:center;gap:6px;">
+                        <span class="fthll-url" title="<?php echo esc_attr($htl_url); ?>" style="font-size:11px;color:#2575fc;font-family:monospace;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;max-width:280px;cursor:pointer;" onclick="fthllCopy(this,'<?php echo esc_js($htl_url); ?>')"><?php echo esc_html($htl_url); ?></span>
+                        <button type="button" class="fthll-copy-btn" data-url="<?php echo esc_attr($htl_url); ?>" style="padding:3px 8px;font-size:11px;background:#e8f0fe;color:#2575fc;border:none;border-radius:4px;cursor:pointer;white-space:nowrap;flex-shrink:0;">Copy</button>
+                    </div>
+                </td>
+                <td style="padding:10px 16px;text-align:center;">
+                    <button type="button" class="fthll-marathon-btn"
+                        data-act="<?php echo esc_attr($act_url); ?>"
+                        data-htl="<?php echo esc_attr($htl_url); ?>"
+                        data-city="<?php echo esc_attr(strtolower($city_name)); ?>"
+                        data-country="<?php echo esc_attr(strtolower($country)); ?>"
+                        style="padding:4px 10px;font-size:11px;font-weight:700;background:#2575fc;color:#fff;border:none;border-radius:5px;cursor:pointer;white-space:nowrap;">
+                        🚀 Marathon
+                    </button>
+                </td>
+            </tr>
+            <?php endforeach; endforeach; ?>
+            </tbody>
+        </table>
+        <div id="fthll_toast" style="display:none;position:fixed;bottom:30px;right:30px;background:#323232;color:#fff;padding:12px 22px;border-radius:8px;font-size:14px;z-index:99999;box-shadow:0 4px 16px rgba(0,0,0,.2);"></div>
+        </div>
+
+        <script>
+        (function($){
+            var $rows = $('.fthll-row');
+            function updateCount() {
+                var v = $rows.filter(':visible').length;
+                $('#fthll_count').text('Showing ' + v + ' cities');
+            }
+            function filterRows() {
+                var q = $('#fthll_search').val().toLowerCase().trim();
+                var reg = $('#fthll_region').val();
+                var tp = $('#fthll_type').val();
+                $rows.each(function() {
+                    var $r = $(this);
+                    var city = $r.data('city') || '';
+                    var country = $r.data('country') || '';
+                    var region = $r.data('region') || '';
+                    var matchQ = !q || city.indexOf(q) !== -1 || country.indexOf(q) !== -1 || region.toLowerCase().indexOf(q) !== -1;
+                    var matchR = !reg || region === reg;
+                    $r.toggle(matchQ && matchR);
+                    if (tp === 'activity') {
+                        $r.find('.fthll-htl-cell').hide();
+                    } else if (tp === 'hotel') {
+                        $r.find('.fthll-act-cell').hide();
+                    } else {
+                        $r.find('.fthll-act-cell, .fthll-htl-cell').show();
+                    }
+                });
+                updateCount();
+            }
+            $('#fthll_search, #fthll_region, #fthll_type').on('input change', filterRows);
+            filterRows();
+
+            // Copy individual URL
+            $('.fthll-copy-btn').on('click', function() {
+                fthllCopy(this, $(this).data('url'));
+            });
+
+            // Copy all visible
+            $('#fthll_copy_all').on('click', function() {
+                var tp = $('#fthll_type').val();
+                var urls = [];
+                $rows.filter(':visible').each(function() {
+                    var $r = $(this);
+                    if (tp !== 'hotel') urls.push($r.find('.fthll-act-cell .fthll-url').attr('title'));
+                    if (tp !== 'activity') urls.push($r.find('.fthll-htl-cell .fthll-url').attr('title'));
+                });
+                navigator.clipboard.writeText(urls.join('\n')).then(function() {
+                    fthllToast('📋 Copied ' + urls.length + ' URLs to clipboard!');
+                });
+            });
+
+            // Send to Marathon Import
+            $('.fthll-marathon-btn').on('click', function() {
+                var $b = $(this);
+                var act = $b.data('act');
+                var htl = $b.data('htl');
+                var tp = $('#fthll_type').val();
+                var url = tp === 'hotel' ? htl : act;
+                var type = tp === 'hotel' ? 'hotel' : (tp === 'activity' ? 'activity' : 'both');
+                // Navigate to import page and prefill
+                var importUrl = '<?php echo admin_url("admin.php?page=fth-klook-import"); ?>&fthll_prefill_url=' + encodeURIComponent(url) + '&fthll_prefill_type=' + type + '&fthll_prefill_city=' + encodeURIComponent($b.data('city')) + '&fthll_prefill_country=' + encodeURIComponent($b.data('country'));
+                window.location.href = importUrl;
+            });
+        })(jQuery);
+
+        function fthllCopy(el, url) {
+            navigator.clipboard.writeText(url).then(function() {
+                fthllToast('✅ Copied: ' + url.replace('https://www.klook.com/en-US','…'));
+            });
+        }
+        function fthllToast(msg) {
+            var $t = jQuery('#fthll_toast');
+            $t.text(msg).fadeIn(200);
+            clearTimeout(window._fthll_toast_timer);
+            window._fthll_toast_timer = setTimeout(function(){ $t.fadeOut(400); }, 3000);
+        }
         </script>
         <?php
     }
