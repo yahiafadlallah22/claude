@@ -2769,12 +2769,16 @@ public static function import_bulk_city() {
                             $htl_suppl[] = $qdata;
                         }
                     }
+                    $clean_htl = $htl_page_props_raw;
+                    unset($clean_htl['dehydratedState']);
                     if (!empty($htl_primary)) {
                         $hlayers = array('_htl_detail' => $htl_primary);
                         if (!empty($htl_suppl)) $hlayers['_htl_supplement'] = $htl_suppl;
-                        $props = array_merge($hlayers, $htl_page_props_raw);
+                        $props = array_merge($hlayers, $clean_htl);
                     } elseif (!empty($htl_suppl)) {
-                        $props = array_merge(array('_htl_supplement' => $htl_suppl), $htl_page_props_raw);
+                        $props = array_merge(array('_htl_supplement' => $htl_suppl), $clean_htl);
+                    } else {
+                        $props = $clean_htl;
                     }
                 }
 
@@ -3367,13 +3371,19 @@ if ($next_data_raw !== '') {
                 }
             }
 
-            // Build $next_props: primary data searched first, then supplements, then raw page props
+            // Build $next_props: primary data searched first, then supplements.
+            // IMPORTANT: strip dehydratedState from page_props before merging so the
+            // DFS cannot fall through to contaminating list-queries buried in the original tree.
+            $clean_props = $page_props_raw;
+            unset($clean_props['dehydratedState']);
             if (!empty($primary_data)) {
                 $layers = array('_act_detail' => $primary_data);
                 if (!empty($supplement)) $layers['_act_supplement'] = $supplement;
-                $next_props = array_merge($layers, $page_props_raw);
+                $next_props = array_merge($layers, $clean_props);
             } elseif (!empty($supplement)) {
-                $next_props = array_merge(array('_act_supplement' => $supplement), $page_props_raw);
+                $next_props = array_merge(array('_act_supplement' => $supplement), $clean_props);
+            } else {
+                $next_props = $clean_props; // no dehydrated data found; rely on pageProps directly
             }
         }
 
@@ -3569,7 +3579,7 @@ if ($next_data_raw !== '') {
         }
 
         if (empty($data['duration'])) {
-            $duration_text = self::normalize_text_block(self::array_find_first($next_props, array('open_time','duration_str','duration','activityDuration','packageDuration','serviceDuration','service_duration')));
+            $duration_text = self::normalize_text_block(self::array_find_first($next_props, array('duration_str','duration','activityDuration','service_duration','serviceDuration','packageDuration','tour_duration','open_time')));
             if ($duration_text !== '') {
                 $data['duration'] = $duration_text;
             }
