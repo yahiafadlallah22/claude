@@ -33,7 +33,6 @@ $current_city = isset($_GET['fth_city']) ? sanitize_text_field($_GET['fth_city']
 get_header();
 ?>
 
-<link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
 <style>
     .fth-container *, .fth-container *::before, .fth-container *::after { box-sizing: border-box; }
     :root { --klook-primary: <?php echo esc_attr($primary_color); ?>; --klook-category: <?php echo esc_attr($color); ?>; --klook-text: #1a1a1a; --klook-text-secondary: #666; --klook-text-light: #999; --klook-bg: #fff; --klook-bg-gray: #f5f5f5; --klook-border: #e8e8e8; --klook-star: #ff9800; }
@@ -104,7 +103,7 @@ get_header();
                 <option value="<?php echo esc_attr($city->slug); ?>" <?php selected($current_city, $city->slug); ?>><?php echo esc_html($city->name); ?></option>
                 <?php endforeach; ?>
             </select>
-            <button type="submit" class="fth-search-btn"><i class="fas fa-search"></i> Search</button>
+            <button type="submit" class="fth-search-btn">🔍 Search</button>
         </form>
     </div>
 </section>
@@ -117,7 +116,7 @@ get_header();
     </nav>
     
     <div class="fth-section-header">
-        <h2 class="fth-section-title"><i class="fas fa-fire" style="color: var(--klook-category);"></i> <?php echo esc_html($term->name); ?> Activities</h2>
+        <h2 class="fth-section-title"><?php echo esc_html(FTH_Templates::get_category_emoji($term)); ?> <?php echo esc_html($term->name); ?> Activities</h2>
         <span><?php echo esc_html($activity_count); ?> results</span>
     </div>
     
@@ -139,7 +138,7 @@ get_header();
             <div class="fth-card-content">
                 <h3 class="fth-card-title"><a href="<?php the_permalink(); ?>"><?php the_title(); ?></a></h3>
                 <div class="fth-card-meta">
-                    <?php if ($rating): ?><span class="fth-card-rating"><i class="fas fa-star"></i> <?php echo esc_html($rating); ?></span><?php endif; ?>
+                    <?php if ($rating): ?><span class="fth-card-rating">⭐ <?php echo esc_html($rating); ?></span><?php endif; ?>
                     <?php if ($reviews): ?><span class="fth-card-reviews">(<?php echo number_format($reviews); ?>)</span><?php endif; ?>
                 </div>
                 <div class="fth-card-footer">
@@ -157,7 +156,7 @@ get_header();
     </div>
     <?php else: ?>
     <div class="fth-no-results">
-        <i class="fas fa-search"></i>
+        <span style="font-size:48px;">🔍</span>
         <h3>No activities found</h3>
         <p>Try a different category or check back later</p>
     </div>

@@ -852,6 +852,52 @@ class FTH_Admin {
         <div style="font-size:12px;opacity:0.65;margin-bottom:10px;letter-spacing:0.4px;">LIVE IMPORT LOG — activities</div>
         <div id="fth_bulk_live_log_items"></div>
     </div>
+    <!-- Marathon Import panel -->
+    <div style="margin-top:24px;padding:20px;background:rgba(0,0,0,0.18);border-radius:12px;border:1px solid rgba(255,255,255,0.15);">
+        <h4 style="margin:0 0 12px;color:#fff;font-size:14px;font-weight:800;letter-spacing:0.3px;">🏃 Marathon Import — import everything, 5 at a time</h4>
+        <p style="margin:0 0 14px;font-size:12px;color:rgba(255,255,255,0.7);">Discovers ALL pages and imports in batches of 5. Leave this tab open — it will run until complete.</p>
+        <div style="display:grid;grid-template-columns:1fr 1fr 1fr 1fr;gap:10px;margin-bottom:14px;">
+            <div>
+                <label style="display:block;margin-bottom:6px;font-size:12px;font-weight:600;color:rgba(255,255,255,0.8);">Destination URL</label>
+                <input type="text" id="fth_marathon_url" placeholder="https://www.klook.com/en-US/..." style="width:100%;padding:8px 10px;border:none;border-radius:6px;font-size:13px;">
+            </div>
+            <div>
+                <label style="display:block;margin-bottom:6px;font-size:12px;font-weight:600;color:rgba(255,255,255,0.8);">City</label>
+                <select id="fth_marathon_city" style="width:100%;padding:8px 10px;border:none;border-radius:6px;font-size:13px;">
+                    <option value="">— select —</option>
+                    <?php foreach ($cities as $city): ?>
+                    <option value="<?php echo esc_attr($city->term_id); ?>"><?php echo esc_html($city->name); ?></option>
+                    <?php endforeach; ?>
+                </select>
+            </div>
+            <div>
+                <label style="display:block;margin-bottom:6px;font-size:12px;font-weight:600;color:rgba(255,255,255,0.8);">Country</label>
+                <select id="fth_marathon_country" style="width:100%;padding:8px 10px;border:none;border-radius:6px;font-size:13px;">
+                    <option value="">— select —</option>
+                    <?php foreach ($countries as $country): ?>
+                    <option value="<?php echo esc_attr($country->term_id); ?>"><?php echo esc_html($country->name); ?></option>
+                    <?php endforeach; ?>
+                </select>
+            </div>
+            <div>
+                <label style="display:block;margin-bottom:6px;font-size:12px;font-weight:600;color:rgba(255,255,255,0.8);">Type</label>
+                <select id="fth_marathon_type" style="width:100%;padding:8px 10px;border:none;border-radius:6px;font-size:13px;">
+                    <option value="activity">Activities</option>
+                    <option value="hotel">Hotels</option>
+                    <option value="both">Both (activities then hotels)</option>
+                </select>
+            </div>
+        </div>
+        <div style="display:flex;align-items:center;gap:12px;flex-wrap:wrap;margin-bottom:12px;">
+            <button type="button" id="fth_marathon_btn" style="background:#fff;color:#2575fc;border:none;padding:10px 24px;font-size:14px;font-weight:800;border-radius:6px;cursor:pointer;">🚀 Start Marathon</button>
+            <button type="button" id="fth_marathon_stop" style="display:none;background:rgba(255,255,255,0.18);color:#fff;border:1px solid rgba(255,255,255,0.5);padding:8px 18px;font-size:13px;font-weight:600;border-radius:6px;cursor:pointer;">⏹ Stop</button>
+            <span id="fth_marathon_counter" style="font-size:13px;color:rgba(255,255,255,0.85);"></span>
+        </div>
+        <div id="fth_marathon_status" style="display:none;padding:10px 14px;border-radius:6px;font-size:13px;margin-bottom:10px;"></div>
+        <div id="fth_marathon_log" style="display:none;background:rgba(0,0,0,0.4);border-radius:8px;padding:12px;max-height:300px;overflow-y:auto;font-size:11px;font-family:monospace;">
+            <div id="fth_marathon_log_items"></div>
+        </div>
+    </div>
 </div>
 
 
@@ -1587,6 +1633,114 @@ class FTH_Admin {
                 complete: function() { $btn.prop('disabled', false).text('🗑️ Delete Selected Content'); }
             });
         });
+
+// ── Marathon Import ──────────────────────────────────────────────────
+var fthMarathonStop = false;
+
+$('#fth_marathon_btn').on('click', function() {
+    var url = $('#fth_marathon_url').val().trim();
+    if (!url) { alert('Please enter a destination URL'); return; }
+    fthMarathonStop = false;
+    var $btn = $(this);
+    var $stop = $('#fth_marathon_stop');
+    var $status = $('#fth_marathon_status');
+    var $counter = $('#fth_marathon_counter');
+    var $log = $('#fth_marathon_log');
+    var $logItems = $('#fth_marathon_log_items');
+    var type = $('#fth_marathon_type').val();
+    var city = $('#fth_marathon_city').val();
+    var country = $('#fth_marathon_country').val();
+    var nonce = '<?php echo wp_create_nonce('fth_import_publish'); ?>';
+
+    $btn.prop('disabled', true).text('Running...');
+    $stop.show();
+    $log.show();
+    $logItems.empty();
+    $status.css('background','rgba(255,255,255,0.15)').text('Discovering URLs...').show();
+    $counter.text('');
+
+    var types = type === 'both' ? ['activity', 'hotel'] : [type];
+    var typeIdx = 0;
+    var totalImported = 0;
+    var totalErrors = 0;
+    var BATCH = 5;
+
+    function marathonLog(msg) {
+        $logItems.prepend('<div style="padding:2px 0;border-bottom:1px solid rgba(255,255,255,0.05);">' + $('<span>').text(msg).html() + '</div>');
+    }
+
+    function runType(currentType) {
+        if (fthMarathonStop) { finish(); return; }
+        $status.text('🔍 Discovering ' + currentType + ' URLs from ' + url + '...');
+        $.ajax({
+            url: ajaxurl, type: 'POST', timeout: 180000,
+            data: { action: 'fth_discover_import_urls', url: url, type: currentType, city: city, country: country, category: '', limit: 200, nonce: nonce },
+            success: function(res) {
+                if (!res.success || !res.data.urls || !res.data.urls.length) {
+                    marathonLog('⚠️ No ' + currentType + ' URLs found');
+                    nextType(); return;
+                }
+                var urls = res.data.urls;
+                marathonLog('✅ Found ' + urls.length + ' ' + currentType + ' URLs' + (res.data.skipped ? ' (' + res.data.skipped + ' already imported)' : ''));
+                $status.text('Importing ' + urls.length + ' ' + currentType + 's in batches of ' + BATCH + '...');
+                importBatch(currentType, urls, 0, urls.length, 0, 0);
+            },
+            error: function() { marathonLog('❌ Discover failed for ' + currentType); nextType(); }
+        });
+    }
+
+    function importBatch(currentType, urls, idx, total, imported, errors) {
+        if (fthMarathonStop || idx >= total) {
+            marathonLog('──── ' + currentType + 's done: ' + imported + ' imported, ' + errors + ' errors ────');
+            totalImported += imported; totalErrors += errors;
+            nextType(); return;
+        }
+        var batch = urls.slice(idx, idx + BATCH);
+        var done = 0;
+        var batchImported = 0;
+        var batchErrors = 0;
+        $counter.text((idx + done) + ' / ' + total + ' ' + currentType + 's');
+        batch.forEach(function(burl) {
+            $.ajax({
+                url: ajaxurl, type: 'POST', timeout: 120000,
+                data: { action: 'fth_import_single_live', url: burl, type: currentType, city: city, country: country, category: '', nonce: nonce },
+                success: function(r) {
+                    if (r.success) { batchImported++; marathonLog('✅ ' + (r.data ? r.data.title : burl)); }
+                    else { batchErrors++; marathonLog('❌ ' + burl + ': ' + (r.data && r.data.message ? r.data.message : 'failed')); }
+                },
+                error: function() { batchErrors++; marathonLog('❌ network error: ' + burl); },
+                complete: function() {
+                    done++;
+                    $counter.text((idx + done) + ' / ' + total + ' ' + currentType + 's');
+                    if (done === batch.length) {
+                        importBatch(currentType, urls, idx + BATCH, total, imported + batchImported, errors + batchErrors);
+                    }
+                }
+            });
+        });
+    }
+
+    function nextType() {
+        typeIdx++;
+        if (!fthMarathonStop && typeIdx < types.length) {
+            runType(types[typeIdx]);
+        } else {
+            finish();
+        }
+    }
+
+    function finish() {
+        $btn.prop('disabled', false).text('🚀 Start Marathon');
+        $stop.hide();
+        $status.css('background', totalImported > 0 ? 'rgba(76,175,80,0.3)' : 'rgba(255,165,0,0.3)')
+              .text('✅ Marathon complete: ' + totalImported + ' imported, ' + totalErrors + ' errors').show();
+        $counter.text(totalImported + ' total imported');
+    }
+
+    runType(types[0]);
+});
+
+$('#fth_marathon_stop').on('click', function() { fthMarathonStop = true; $(this).hide(); });
         </script>
         <?php
     }

@@ -89,7 +89,7 @@ body.single-travel_hotel .widget-area,body.single-travel_hotel .sidebar,body.sin
 .klh-title{margin:10px 0 14px;font-size:28px;font-weight:800;line-height:1.2}
 .klh-meta{display:flex;flex-wrap:wrap;gap:10px;margin:0 0 18px;padding:0;list-style:none}
 .klh-meta li{display:flex;align-items:center;gap:6px;padding:7px 12px;border-radius:999px;background:#f5f5f5;font-size:13px;font-weight:600;color:#333}
-.klh-promo{display:flex;align-items:center;gap:12px;background:linear-gradient(135deg,<?php echo esc_attr($primary); ?>,<?php echo esc_attr($secondary); ?>);color:#fff;border-radius:12px;padding:14px 18px;margin:0 0 20px;font-weight:800;font-size:15px}
+.klh-promo{display:flex;align-items:center;gap:12px;background:linear-gradient(135deg,<?php echo esc_attr($primary); ?>,<?php echo esc_attr($secondary); ?>);color:#fff;border-radius:12px;padding:14px 18px;margin:18px 0 20px;font-weight:800;font-size:15px}
 .klh-section{background:#fff;border-radius:16px;padding:22px;box-shadow:0 2px 12px rgba(0,0,0,.07);margin-top:16px}
 .klh-sec-title{margin:0 0 14px;font-size:18px;font-weight:800;color:#1a1a1a;display:flex;align-items:center;gap:8px}
 .klh-sec-title .icon{display:inline-flex;align-items:center;justify-content:center;width:30px;height:30px;border-radius:8px;background:<?php echo esc_attr($primary); ?>22;color:<?php echo esc_attr($primary); ?>;font-size:14px}
@@ -111,23 +111,11 @@ body.single-travel_hotel .widget-area,body.single-travel_hotel .sidebar,body.sin
 .klh-cta:hover{opacity:.88}
 .klh-trust{display:grid;gap:10px;margin-top:16px}
 .klh-trust-item{display:flex;gap:10px;align-items:flex-start;font-size:13px;color:#555}
-.klh-mobile-cta{display:none}
 @media(max-width:1100px){
-  .klh-main{grid-template-columns:1fr}.klh-sidebar{position:static}.klh-related-grid{grid-template-columns:repeat(2,minmax(0,1fr))}.klh-amenities{grid-template-columns:1fr}
-  .klh-mobile-cta{display:flex;position:sticky;top:0;z-index:999;width:100%;background:<?php echo esc_attr($primary); ?>;color:#fff;align-items:center;justify-content:space-between;padding:12px 16px;gap:10px;box-shadow:0 2px 12px rgba(0,0,0,.18)}
-  .klh-mobile-cta-price{font-size:18px;font-weight:900;line-height:1}
-  .klh-mobile-cta-price small{display:block;font-size:11px;font-weight:400;opacity:.8}
-  .klh-mobile-cta-btn{flex-shrink:0;background:#fff;color:<?php echo esc_attr($primary); ?>;font-weight:800;font-size:14px;padding:10px 18px;border-radius:8px;text-decoration:none;white-space:nowrap;text-transform:uppercase;letter-spacing:.4px}
+  .klh-main{grid-template-columns:1fr;display:flex;flex-direction:column}.klh-sidebar{position:static;order:-1}.klh-related-grid{grid-template-columns:repeat(2,minmax(0,1fr))}.klh-amenities{grid-template-columns:1fr}
 }
 @media(max-width:640px){.klh-title{font-size:22px}.klh-related-grid{grid-template-columns:1fr}}
-@media(max-width:480px){.klh-main{padding:12px 12px 40px}.klh-card,.klh-section,.klh-book-box{padding:16px}.klh-mobile-cta{padding:10px 12px}}
-/* Yahia promo box – mobile vs desktop */
-.klh-yahia-mobile{display:none}
-.klh-yahia-desktop{display:block}
-@media(max-width:1100px){
-  .klh-yahia-mobile{display:block;background:#fff7ed;border:1px solid #fed7aa;border-radius:12px;padding:16px;text-align:center;margin-top:16px}
-  .klh-yahia-desktop{display:none}
-}
+@media(max-width:480px){.klh-main{padding:12px 12px 40px}.klh-card,.klh-section,.klh-book-box{padding:16px}}
 .klh-faq-item{border:1px solid #e8e8e8;border-radius:10px;margin-bottom:8px;overflow:hidden}
 .klh-faq-q{display:flex;justify-content:space-between;align-items:center;padding:14px 16px;cursor:pointer;font-weight:700;font-size:14px;background:#fafafa;gap:10px}
 .klh-faq-q:hover{background:#f0f7ff}
@@ -142,20 +130,6 @@ body.single-travel_hotel .widget-area,body.single-travel_hotel .sidebar,body.sin
 </style>
 
 <div class="klh">
-  <!-- Mobile sticky CTA bar (hidden on desktop via CSS) -->
-  <div class="klh-mobile-cta">
-    <div class="klh-mobile-cta-price">
-      <small>Per night from</small>
-      <?php if ($price): ?>
-        <?php echo esc_html($sym . number_format((float)$price, 0)); ?>
-      <?php else: ?>
-        <span style="font-size:15px;">Check rate</span>
-      <?php endif; ?>
-    </div>
-    <a class="klh-mobile-cta-btn" href="<?php echo esc_url($affiliate_link ?: '#'); ?>" target="_blank" rel="noopener noreferrer">
-      🏨 <?php echo esc_html($cta_text); ?>
-    </a>
-  </div>
   <div class="klh-bc"><div class="klh-bc-in">
     <a href="<?php echo esc_url(FTH_Templates::get_hub_url('hotels')); ?>">Hotels</a>
     <span>›</span>
@@ -209,13 +183,10 @@ body.single-travel_hotel .widget-area,body.single-travel_hotel .sidebar,body.sin
         <?php if ($address): ?><p style="margin-top:14px;font-size:14px;"><strong>Address:</strong> <?php echo esc_html($address); ?></p><?php endif; ?>
       </div>
 
-      <!-- Yahia promo box – mobile only, after "About this hotel" -->
-      <div class="klh-yahia-mobile">
-        <img src="https://yahiadubai.com/wp-content/uploads/2026/03/New-Project-4.png" alt="Yahia Fadlallah" style="max-width:100px;height:auto;display:block;margin:0 auto 10px;border-radius:8px;">
-        <div style="font-size:14px;color:#92400e;font-weight:700;">🤝 <?php echo esc_html($promo_text); ?></div>
-        <?php if ($affiliate_link): ?>
-        <a href="<?php echo esc_url($affiliate_link); ?>" target="_blank" rel="noopener noreferrer" style="display:inline-block;margin-top:10px;background:<?php echo esc_attr($primary); ?>;color:#fff;font-weight:800;font-size:14px;padding:10px 22px;border-radius:8px;text-decoration:none;">🏨 <?php echo esc_html($cta_text); ?></a>
-        <?php endif; ?>
+      <!-- Yahia Fadlallah exclusive deal card – shown right after description -->
+      <div class="klh-section" style="text-align:center;padding:16px">
+        <img src="https://yahiadubai.com/wp-content/uploads/2026/03/New-Project-4.png" alt="Yahia Fadlallah" style="max-width:90px;height:auto;display:block;margin:0 auto 10px;border-radius:8px;">
+        <div style="font-size:14px;color:#92400e;font-weight:700;background:#fff7ed;border:1px solid #fed7aa;border-radius:8px;padding:10px;">🤝 <?php echo esc_html($promo_text); ?></div>
       </div>
 
       <?php if (!empty($highlights_raw)):

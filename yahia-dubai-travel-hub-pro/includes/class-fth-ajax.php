@@ -1126,6 +1126,10 @@ private static function import_post_images($post_id, $main_image, $gallery = arr
     $post_slug  = $post ? sanitize_title($post->post_title) : 'activity';
     $post_type  = $post ? $post->post_type : 'travel_activity';
     $type_label = ($post_type === 'travel_hotel') ? 'hotel' : 'activity';
+    // Activities use only the main featured image (no gallery needed – keeps pages clean)
+    if ($post_type === 'travel_activity') {
+        $gallery = array();
+    }
     $city_terms = wp_get_object_terms($post_id, 'travel_city', array('fields' => 'slugs'));
     $city_slug  = (!is_wp_error($city_terms) && !empty($city_terms)) ? $city_terms[0] : '';
     $seo_base   = $city_slug ? "{$post_slug}-{$type_label}-{$city_slug}" : "{$post_slug}-{$type_label}";
@@ -1321,8 +1325,10 @@ public static function import_single_live() {
         self::send_json_error_clean('No URL provided');
     }
     $params = array(
-        'city'     => $city, 'country' => $country, 'category' => $cat,
-        'publish'  => 1, 'is_featured' => 0, 'is_bestseller' => 0,
+        'city'         => $city, 'country' => $country, 'category' => $cat,
+        'publish'      => 1,
+        'is_featured'  => !empty($_POST['is_featured'])  ? 1 : 0,
+        'is_bestseller'=> !empty($_POST['is_bestseller']) ? 1 : 0,
     );
     if ($type === 'hotel') {
         $result = self::import_hotel($url, $params, self::build_affiliate_redirect($url));
@@ -2615,8 +2621,21 @@ public static function import_bulk_city() {
                 }
             }
         }
-        if (preg_match('/<script[^>]*id=["\']__NEXT_DATA__["\'][^>]*>(.*?)<\/script>/si', $html, $m)) {
-            $next = json_decode(html_entity_decode(trim($m[1]), ENT_QUOTES, 'UTF-8'), true);
+        // Use strpos/substr to avoid pcre.backtrack_limit failures on large Klook JSON
+        $htl_nd_raw = '';
+        foreach (array('id="__NEXT_DATA__"', "id='__NEXT_DATA__'", 'id="__NEXT_DATA__" ', "id='__NEXT_DATA__' ") as $_htl_nd_marker) {
+            $_htl_nd_pos = strpos($html, $_htl_nd_marker);
+            if ($_htl_nd_pos !== false) {
+                $_htl_nd_gt  = strpos($html, '>', $_htl_nd_pos);
+                $_htl_nd_end = $_htl_nd_gt !== false ? strpos($html, '</script>', $_htl_nd_gt + 1) : false;
+                if ($_htl_nd_gt !== false && $_htl_nd_end !== false) {
+                    $htl_nd_raw = substr($html, $_htl_nd_gt + 1, $_htl_nd_end - $_htl_nd_gt - 1);
+                }
+                break;
+            }
+        }
+        if ($htl_nd_raw !== '') {
+            $next = json_decode(html_entity_decode(trim($htl_nd_raw), ENT_QUOTES, 'UTF-8'), true);
             if (is_array($next)) {
                 $props = isset($next['props']['pageProps']) ? $next['props']['pageProps'] : $next;
                 $title = self::normalize_front_title(self::array_find_first($props, array('seoTitle','hotelName','name','title','hotel_title')), $url);
@@ -2655,7 +2674,10 @@ public static function import_bulk_city() {
                 if ($amen !== '') {
                     $data['amenities'] = self::bullet_lines($amen, 16);
                 }
-                $images = self::array_collect_values($props, array('image','imageUrl','coverImageUrl','originalUrl'));
+                $images = self::array_collect_values($props, array(
+                    'image','imageUrl','coverImageUrl','originalUrl','imgUrl','large','original',
+                    'coverImages','images','gallery','photos','imageList','htlImages','hotelImages',
+                ));
                 $clean = self::clean_image_urls($images, 10);
                 if (!empty($clean)) {
                     $data['images'] = array_values(array_unique(array_merge($data['images'], $clean)));
