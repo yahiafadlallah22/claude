@@ -159,6 +159,16 @@ class FTH_Admin {
             'fth-klook-links',
             array(__CLASS__, 'klook_links_page')
         );
+
+        // Marathon Import — dedicated bulk import page
+        add_submenu_page(
+            'fth-travel-hub',
+            'Marathon Import',
+            '🏃 Marathon Import',
+            'manage_options',
+            'fth-marathon',
+            array(__CLASS__, 'marathon_page')
+        );
     }
     
     /**
@@ -1734,14 +1744,14 @@ class FTH_Admin {
         });
 
 // ── Marathon Import ──────────────────────────────────────────────────
-// Nonce available immediately (PHP rendered at page load)
 var fthMarathonNonce = '<?php echo wp_create_nonce('fth_import_publish'); ?>';
 var fthMarathonStop  = false;
 
-// Use window.addEventListener so we never depend on jQuery being loaded first
-window.addEventListener('DOMContentLoaded', function() {
+// Fix: DOMContentLoaded may have ALREADY fired before this inline script runs
+// (WordPress enqueues scripts at bottom of body). Always run immediately if DOM is ready.
+function fthInitMarathon() {
     var jq = window.jQuery;
-    if (!jq) { return; } // jQuery not available, bail silently
+    if (!jq) { return; }
 
     // Auto-prefill from Klook Links Library query params
     (function() {
@@ -1869,7 +1879,13 @@ window.addEventListener('DOMContentLoaded', function() {
 
         runType(types[0]);
     });
-}); // end DOMContentLoaded
+} // end fthInitMarathon
+// Run now if DOM already ready, otherwise wait
+if (document.readyState === 'loading') {
+    document.addEventListener('DOMContentLoaded', fthInitMarathon);
+} else {
+    fthInitMarathon();
+}
         </script>
         <?php
     }
@@ -2374,6 +2390,536 @@ window.addEventListener('DOMContentLoaded', function() {
             clearTimeout(window._fthll_toast_timer);
             window._fthll_toast_timer = setTimeout(function(){ $t.fadeOut(400); }, 3000);
         }
+        </script>
+        <?php
+    }
+
+    // ─────────────────────────────────────────────────────────────
+    // MARATHON IMPORT — Dedicated bulk import page
+    // ─────────────────────────────────────────────────────────────
+    public static function marathon_page() {
+        if (!current_user_can('manage_options')) { wp_die('Unauthorized'); }
+
+        // Build city/country data for JS
+        $cities_terms    = get_terms(array('taxonomy' => 'travel_city',    'hide_empty' => false, 'orderby' => 'name'));
+        $countries_terms = get_terms(array('taxonomy' => 'travel_country', 'hide_empty' => false, 'orderby' => 'name'));
+        if (is_wp_error($cities_terms))    $cities_terms    = array();
+        if (is_wp_error($countries_terms)) $countries_terms = array();
+
+        // Map country_id => [city objects]
+        $country_cities_map = array();
+        foreach ($cities_terms as $ct) {
+            $pc = get_term_meta($ct->term_id, 'fth_parent_country', true);
+            if ($pc) { $country_cities_map[(int)$pc][] = $ct; }
+        }
+
+        // Build JS city objects: {id, name, slug, url}
+        $js_cities = array();
+        foreach ($cities_terms as $ct) {
+            $klook_url = get_term_meta($ct->term_id, '_fth_klook_url', true);
+            if (empty($klook_url)) {
+                $klook_url = 'https://www.klook.com/en-US/things-to-do/' . $ct->slug . '/';
+            }
+            $cid = (int) get_term_meta($ct->term_id, 'fth_parent_country', true);
+            $js_cities[] = array('id' => $ct->term_id, 'name' => $ct->name, 'slug' => $ct->slug, 'url' => $klook_url, 'country_id' => $cid);
+        }
+        $js_countries = array();
+        foreach ($countries_terms as $co) {
+            $city_list = isset($country_cities_map[$co->term_id]) ? $country_cities_map[$co->term_id] : array();
+            $city_data = array();
+            foreach ($city_list as $ct) {
+                $ku = get_term_meta($ct->term_id, '_fth_klook_url', true);
+                if (empty($ku)) $ku = 'https://www.klook.com/en-US/things-to-do/' . $ct->slug . '/';
+                $city_data[] = array('id' => $ct->term_id, 'name' => $ct->name, 'slug' => $ct->slug, 'url' => $ku, 'country_id' => $co->term_id);
+            }
+            $js_countries[] = array('id' => $co->term_id, 'name' => $co->name, 'slug' => $co->slug, 'cities' => $city_data);
+        }
+
+        // World cities — full global list with known Klook destination URLs
+        $world_cities = array(
+            // UAE
+            array('name'=>'Dubai','slug'=>'dubai','url'=>'https://www.klook.com/en-US/destination/c78-dubai/1-things-to-do/','country'=>'UAE'),
+            array('name'=>'Abu Dhabi','slug'=>'abu-dhabi','url'=>'https://www.klook.com/en-US/destination/c79-abu-dhabi/1-things-to-do/','country'=>'UAE'),
+            array('name'=>'Sharjah','slug'=>'sharjah','url'=>'https://www.klook.com/en-US/things-to-do/sharjah/','country'=>'UAE'),
+            array('name'=>'Ras Al Khaimah','slug'=>'ras-al-khaimah','url'=>'https://www.klook.com/en-US/things-to-do/ras-al-khaimah/','country'=>'UAE'),
+            // Qatar / Saudi / Kuwait / Oman / Bahrain / Jordan
+            array('name'=>'Doha','slug'=>'doha','url'=>'https://www.klook.com/en-US/destination/c80-doha/1-things-to-do/','country'=>'Qatar'),
+            array('name'=>'Riyadh','slug'=>'riyadh','url'=>'https://www.klook.com/en-US/things-to-do/riyadh/','country'=>'Saudi Arabia'),
+            array('name'=>'Jeddah','slug'=>'jeddah','url'=>'https://www.klook.com/en-US/things-to-do/jeddah/','country'=>'Saudi Arabia'),
+            array('name'=>'Mecca','slug'=>'mecca','url'=>'https://www.klook.com/en-US/things-to-do/mecca/','country'=>'Saudi Arabia'),
+            array('name'=>'Kuwait City','slug'=>'kuwait-city','url'=>'https://www.klook.com/en-US/things-to-do/kuwait-city/','country'=>'Kuwait'),
+            array('name'=>'Muscat','slug'=>'muscat','url'=>'https://www.klook.com/en-US/things-to-do/muscat/','country'=>'Oman'),
+            array('name'=>'Manama','slug'=>'manama','url'=>'https://www.klook.com/en-US/things-to-do/manama/','country'=>'Bahrain'),
+            array('name'=>'Amman','slug'=>'amman','url'=>'https://www.klook.com/en-US/things-to-do/amman/','country'=>'Jordan'),
+            array('name'=>'Petra','slug'=>'petra','url'=>'https://www.klook.com/en-US/things-to-do/petra/','country'=>'Jordan'),
+            array('name'=>'Beirut','slug'=>'beirut','url'=>'https://www.klook.com/en-US/things-to-do/beirut/','country'=>'Lebanon'),
+            // Asia
+            array('name'=>'Bangkok','slug'=>'bangkok','url'=>'https://www.klook.com/en-US/things-to-do/bangkok/','country'=>'Thailand'),
+            array('name'=>'Phuket','slug'=>'phuket','url'=>'https://www.klook.com/en-US/things-to-do/phuket/','country'=>'Thailand'),
+            array('name'=>'Chiang Mai','slug'=>'chiang-mai','url'=>'https://www.klook.com/en-US/things-to-do/chiang-mai/','country'=>'Thailand'),
+            array('name'=>'Singapore','slug'=>'singapore','url'=>'https://www.klook.com/en-US/things-to-do/singapore/','country'=>'Singapore'),
+            array('name'=>'Kuala Lumpur','slug'=>'kuala-lumpur','url'=>'https://www.klook.com/en-US/things-to-do/kuala-lumpur/','country'=>'Malaysia'),
+            array('name'=>'Bali','slug'=>'bali','url'=>'https://www.klook.com/en-US/things-to-do/bali/','country'=>'Indonesia'),
+            array('name'=>'Jakarta','slug'=>'jakarta','url'=>'https://www.klook.com/en-US/things-to-do/jakarta/','country'=>'Indonesia'),
+            array('name'=>'Tokyo','slug'=>'tokyo','url'=>'https://www.klook.com/en-US/things-to-do/tokyo/','country'=>'Japan'),
+            array('name'=>'Osaka','slug'=>'osaka','url'=>'https://www.klook.com/en-US/things-to-do/osaka/','country'=>'Japan'),
+            array('name'=>'Kyoto','slug'=>'kyoto','url'=>'https://www.klook.com/en-US/things-to-do/kyoto/','country'=>'Japan'),
+            array('name'=>'Seoul','slug'=>'seoul','url'=>'https://www.klook.com/en-US/things-to-do/seoul/','country'=>'South Korea'),
+            array('name'=>'Hong Kong','slug'=>'hong-kong','url'=>'https://www.klook.com/en-US/things-to-do/hong-kong/','country'=>'Hong Kong'),
+            array('name'=>'Taipei','slug'=>'taipei','url'=>'https://www.klook.com/en-US/things-to-do/taipei/','country'=>'Taiwan'),
+            array('name'=>'Beijing','slug'=>'beijing','url'=>'https://www.klook.com/en-US/things-to-do/beijing/','country'=>'China'),
+            array('name'=>'Shanghai','slug'=>'shanghai','url'=>'https://www.klook.com/en-US/things-to-do/shanghai/','country'=>'China'),
+            array('name'=>'Mumbai','slug'=>'mumbai','url'=>'https://www.klook.com/en-US/things-to-do/mumbai/','country'=>'India'),
+            array('name'=>'Delhi','slug'=>'delhi','url'=>'https://www.klook.com/en-US/things-to-do/delhi/','country'=>'India'),
+            array('name'=>'Agra','slug'=>'agra','url'=>'https://www.klook.com/en-US/things-to-do/agra/','country'=>'India'),
+            array('name'=>'Hanoi','slug'=>'hanoi','url'=>'https://www.klook.com/en-US/things-to-do/hanoi/','country'=>'Vietnam'),
+            array('name'=>'Ho Chi Minh City','slug'=>'ho-chi-minh-city','url'=>'https://www.klook.com/en-US/things-to-do/ho-chi-minh-city/','country'=>'Vietnam'),
+            array('name'=>'Phnom Penh','slug'=>'phnom-penh','url'=>'https://www.klook.com/en-US/things-to-do/phnom-penh/','country'=>'Cambodia'),
+            array('name'=>'Siem Reap','slug'=>'siem-reap','url'=>'https://www.klook.com/en-US/things-to-do/siem-reap/','country'=>'Cambodia'),
+            // Europe
+            array('name'=>'Paris','slug'=>'paris','url'=>'https://www.klook.com/en-US/things-to-do/paris/','country'=>'France'),
+            array('name'=>'London','slug'=>'london','url'=>'https://www.klook.com/en-US/things-to-do/london/','country'=>'UK'),
+            array('name'=>'Rome','slug'=>'rome','url'=>'https://www.klook.com/en-US/things-to-do/rome/','country'=>'Italy'),
+            array('name'=>'Barcelona','slug'=>'barcelona','url'=>'https://www.klook.com/en-US/things-to-do/barcelona/','country'=>'Spain'),
+            array('name'=>'Madrid','slug'=>'madrid','url'=>'https://www.klook.com/en-US/things-to-do/madrid/','country'=>'Spain'),
+            array('name'=>'Amsterdam','slug'=>'amsterdam','url'=>'https://www.klook.com/en-US/things-to-do/amsterdam/','country'=>'Netherlands'),
+            array('name'=>'Berlin','slug'=>'berlin','url'=>'https://www.klook.com/en-US/things-to-do/berlin/','country'=>'Germany'),
+            array('name'=>'Vienna','slug'=>'vienna','url'=>'https://www.klook.com/en-US/things-to-do/vienna/','country'=>'Austria'),
+            array('name'=>'Prague','slug'=>'prague','url'=>'https://www.klook.com/en-US/things-to-do/prague/','country'=>'Czech Republic'),
+            array('name'=>'Istanbul','slug'=>'istanbul','url'=>'https://www.klook.com/en-US/things-to-do/istanbul/','country'=>'Turkey'),
+            array('name'=>'Athens','slug'=>'athens','url'=>'https://www.klook.com/en-US/things-to-do/athens/','country'=>'Greece'),
+            array('name'=>'Santorini','slug'=>'santorini','url'=>'https://www.klook.com/en-US/things-to-do/santorini/','country'=>'Greece'),
+            // Americas / Africa
+            array('name'=>'New York','slug'=>'new-york','url'=>'https://www.klook.com/en-US/things-to-do/new-york/','country'=>'USA'),
+            array('name'=>'Los Angeles','slug'=>'los-angeles','url'=>'https://www.klook.com/en-US/things-to-do/los-angeles/','country'=>'USA'),
+            array('name'=>'Las Vegas','slug'=>'las-vegas','url'=>'https://www.klook.com/en-US/things-to-do/las-vegas/','country'=>'USA'),
+            array('name'=>'Cairo','slug'=>'cairo','url'=>'https://www.klook.com/en-US/things-to-do/cairo/','country'=>'Egypt'),
+            array('name'=>'Cape Town','slug'=>'cape-town','url'=>'https://www.klook.com/en-US/things-to-do/cape-town/','country'=>'South Africa'),
+            array('name'=>'Sydney','slug'=>'sydney','url'=>'https://www.klook.com/en-US/things-to-do/sydney/','country'=>'Australia'),
+            array('name'=>'Melbourne','slug'=>'melbourne','url'=>'https://www.klook.com/en-US/things-to-do/melbourne/','country'=>'Australia'),
+        );
+
+        $nonce        = wp_create_nonce('fth_import_publish');
+        $ajax_url     = admin_url('admin-ajax.php');
+        ?>
+        <style>
+        #fth-marathon-wrap{font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,sans-serif;background:#0f172a;min-height:100vh;padding:0;margin:-10px -20px -20px;color:#fff}
+        #fth-marathon-wrap *{box-sizing:border-box}
+        .fm-header{background:linear-gradient(135deg,#1e3a5f,#2575fc);padding:28px 32px 22px;border-bottom:1px solid rgba(255,255,255,.1)}
+        .fm-header h1{margin:0 0 4px;font-size:26px;font-weight:900}
+        .fm-header p{margin:0;opacity:.8;font-size:14px}
+        .fm-body{padding:24px 32px;max-width:1100px}
+        .fm-card{background:rgba(255,255,255,.05);border:1px solid rgba(255,255,255,.1);border-radius:14px;padding:22px 24px;margin-bottom:20px}
+        .fm-card h3{margin:0 0 16px;font-size:14px;font-weight:800;text-transform:uppercase;letter-spacing:.6px;color:rgba(255,255,255,.6)}
+        .fm-modes{display:flex;gap:10px;flex-wrap:wrap}
+        .fm-mode-btn{background:rgba(255,255,255,.08);border:2px solid rgba(255,255,255,.15);color:#fff;padding:12px 20px;border-radius:10px;cursor:pointer;font-size:14px;font-weight:700;transition:all .2s}
+        .fm-mode-btn:hover{background:rgba(255,255,255,.15);border-color:rgba(255,255,255,.3)}
+        .fm-mode-btn.active{background:rgba(37,117,252,.3);border-color:#2575fc;color:#fff}
+        .fm-row{display:grid;grid-template-columns:1fr 1fr;gap:16px}
+        @media(max-width:700px){.fm-row{grid-template-columns:1fr}}
+        .fm-label{font-size:12px;font-weight:700;color:rgba(255,255,255,.6);margin-bottom:6px}
+        .fm-select,.fm-input{width:100%;background:rgba(0,0,0,.35);border:1px solid rgba(255,255,255,.15);color:#fff;padding:11px 14px;border-radius:8px;font-size:14px}
+        .fm-select option{background:#1a2940;color:#fff}
+        .fm-type-btns{display:flex;gap:10px}
+        .fm-type-btn{flex:1;background:rgba(255,255,255,.08);border:2px solid rgba(255,255,255,.15);color:#fff;padding:11px;border-radius:8px;cursor:pointer;font-size:13px;font-weight:700;transition:all .2s;text-align:center}
+        .fm-type-btn.active{background:rgba(37,117,252,.3);border-color:#2575fc}
+        .fm-actions{display:flex;gap:12px;align-items:center;flex-wrap:wrap}
+        .fm-btn-start{background:linear-gradient(135deg,#2575fc,#6a11cb);color:#fff;border:none;padding:14px 36px;border-radius:10px;font-size:16px;font-weight:900;cursor:pointer;transition:opacity .2s}
+        .fm-btn-start:disabled{opacity:.5;cursor:not-allowed}
+        .fm-btn-stop{display:none;background:rgba(239,68,68,.2);border:1px solid #ef4444;color:#fca5a5;padding:12px 24px;border-radius:10px;font-size:14px;font-weight:700;cursor:pointer}
+        .fm-btn-reset{background:rgba(255,255,255,.08);border:1px solid rgba(255,255,255,.2);color:#fff;padding:12px 20px;border-radius:10px;font-size:13px;font-weight:600;cursor:pointer}
+        .fm-stats{display:grid;grid-template-columns:repeat(4,1fr);gap:12px;margin-bottom:16px}
+        .fm-stat{background:rgba(255,255,255,.05);border-radius:10px;padding:14px;text-align:center}
+        .fm-stat .num{font-size:32px;font-weight:900;line-height:1}
+        .fm-stat .lbl{font-size:11px;color:rgba(255,255,255,.5);margin-top:4px;font-weight:600;text-transform:uppercase}
+        .fm-progress-wrap{background:rgba(255,255,255,.1);border-radius:999px;height:10px;overflow:hidden;margin-bottom:8px}
+        .fm-progress-bar{height:100%;border-radius:999px;background:linear-gradient(90deg,#2575fc,#6a11cb);width:0%;transition:width .4s}
+        .fm-current{font-size:12px;color:rgba(255,255,255,.55);margin-bottom:16px;min-height:18px}
+        .fm-log{background:rgba(0,0,0,.4);border-radius:10px;padding:14px;max-height:420px;overflow-y:auto;font-family:monospace;font-size:12px}
+        .fm-log-empty{color:rgba(255,255,255,.3);text-align:center;padding:24px;font-style:italic}
+        .fm-log-item{padding:4px 0;border-bottom:1px solid rgba(255,255,255,.05);display:flex;gap:8px;align-items:flex-start}
+        .fm-log-item:last-child{border-bottom:none}
+        .fm-log-ts{color:rgba(255,255,255,.3);flex-shrink:0;font-size:10px;padding-top:2px}
+        .fm-panel-hidden{display:none}
+        </style>
+        <div id="fth-marathon-wrap">
+        <div class="fm-header">
+            <h1>🏃 Marathon Import</h1>
+            <p>Import en masse depuis Klook — ville, pays, ou monde entier. S'exécute indéfiniment sans timeout.</p>
+        </div>
+        <div class="fm-body">
+
+        <!-- Mode selector -->
+        <div class="fm-card">
+            <h3>1. Portée de l'import</h3>
+            <div class="fm-modes">
+                <button class="fm-mode-btn active" data-mode="city">🏙 Une ville</button>
+                <button class="fm-mode-btn" data-mode="country">🌍 Un pays (toutes ses villes)</button>
+                <button class="fm-mode-btn" data-mode="allcities">🗺 Toutes mes villes (base WP)</button>
+                <button class="fm-mode-btn" data-mode="world">🌐 Monde entier (<?php echo count($world_cities); ?> villes Klook)</button>
+            </div>
+        </div>
+
+        <!-- Scope config -->
+        <div class="fm-card" id="fm-scope-city">
+            <h3>Ville à importer</h3>
+            <div class="fm-row">
+                <div>
+                    <div class="fm-label">Ville enregistrée en base</div>
+                    <select class="fm-select" id="fm_city_select">
+                        <option value="">— Choisir une ville —</option>
+                        <?php foreach ($cities_terms as $ct):
+                            $ku = get_term_meta($ct->term_id, '_fth_klook_url', true) ?: 'https://www.klook.com/en-US/things-to-do/' . $ct->slug . '/';
+                        ?>
+                        <option value="<?php echo $ct->term_id; ?>" data-slug="<?php echo esc_attr($ct->slug); ?>" data-url="<?php echo esc_attr($ku); ?>" data-name="<?php echo esc_attr($ct->name); ?>"><?php echo esc_html($ct->name); ?></option>
+                        <?php endforeach; ?>
+                    </select>
+                </div>
+                <div>
+                    <div class="fm-label">Ou entrer une URL Klook manuellement</div>
+                    <input type="text" class="fm-input" id="fm_city_url" placeholder="https://www.klook.com/en-US/destination/c78-dubai/1-things-to-do/">
+                </div>
+            </div>
+        </div>
+
+        <div class="fm-card fm-panel-hidden" id="fm-scope-country">
+            <h3>Pays à importer</h3>
+            <div class="fm-label">Pays</div>
+            <select class="fm-select" id="fm_country_select" style="max-width:360px">
+                <option value="">— Choisir un pays —</option>
+                <?php foreach ($js_countries as $co): ?>
+                <option value="<?php echo $co['id']; ?>"><?php echo esc_html($co['name']); ?> (<?php echo count($co['cities']); ?> villes)</option>
+                <?php endforeach; ?>
+            </select>
+            <p style="margin:10px 0 0;font-size:12px;opacity:.6;">Toutes les villes de ce pays seront importées séquentiellement.</p>
+        </div>
+
+        <div class="fm-card fm-panel-hidden" id="fm-scope-allcities">
+            <h3>Toutes mes villes (<?php echo count($cities_terms); ?> villes en base)</h3>
+            <p style="margin:0;font-size:13px;opacity:.8;">Le marathon passera par toutes les villes enregistrées dans Travel Hub.</p>
+        </div>
+
+        <div class="fm-card fm-panel-hidden" id="fm-scope-world">
+            <h3>Monde entier — <?php echo count($world_cities); ?> grandes villes Klook</h3>
+            <p style="margin:0 0 10px;font-size:13px;opacity:.8;">Importe depuis toutes les grandes destinations mondiales disponibles sur Klook.</p>
+            <div style="display:flex;flex-wrap:wrap;gap:6px;">
+                <?php foreach ($world_cities as $wc): ?>
+                <span style="background:rgba(255,255,255,.1);border-radius:20px;padding:3px 10px;font-size:11px;"><?php echo esc_html($wc['name']); ?></span>
+                <?php endforeach; ?>
+            </div>
+        </div>
+
+        <!-- Import type -->
+        <div class="fm-card">
+            <h3>2. Type de contenu</h3>
+            <div class="fm-type-btns">
+                <button class="fm-type-btn active" data-type="both">🎟 + 🏨 Activités &amp; Hôtels</button>
+                <button class="fm-type-btn" data-type="activity">🎟 Activités uniquement</button>
+                <button class="fm-type-btn" data-type="hotel">🏨 Hôtels uniquement</button>
+            </div>
+        </div>
+
+        <!-- WP assignment -->
+        <div class="fm-card">
+            <h3>3. Assignation WordPress (optionnel)</h3>
+            <div class="fm-row">
+                <div>
+                    <div class="fm-label">Ville WP par défaut</div>
+                    <select class="fm-select" id="fm_wp_city">
+                        <option value="">Auto-detect</option>
+                        <?php foreach ($cities_terms as $ct): ?>
+                        <option value="<?php echo $ct->term_id; ?>"><?php echo esc_html($ct->name); ?></option>
+                        <?php endforeach; ?>
+                    </select>
+                </div>
+                <div>
+                    <div class="fm-label">Pays WP par défaut</div>
+                    <select class="fm-select" id="fm_wp_country">
+                        <option value="">Auto-detect</option>
+                        <?php foreach ($countries_terms as $co): ?>
+                        <option value="<?php echo $co->term_id; ?>"><?php echo esc_html($co->name); ?></option>
+                        <?php endforeach; ?>
+                    </select>
+                </div>
+            </div>
+        </div>
+
+        <!-- Controls -->
+        <div class="fm-card">
+            <div class="fm-actions">
+                <button class="fm-btn-start" id="fm_start">🚀 Lancer le Marathon</button>
+                <button class="fm-btn-stop"  id="fm_stop">⏹ Arrêter</button>
+                <button class="fm-btn-reset" id="fm_reset">🔄 Réinitialiser</button>
+                <span id="fm_phase" style="font-size:13px;opacity:.7;"></span>
+            </div>
+        </div>
+
+        <!-- Progress & log (hidden until started) -->
+        <div class="fm-card" id="fm-progress-card" style="display:none">
+            <div class="fm-stats">
+                <div class="fm-stat"><div class="num" id="fm_s_imported" style="color:#34d399">0</div><div class="lbl">✅ Importés</div></div>
+                <div class="fm-stat"><div class="num" id="fm_s_errors"   style="color:#f87171">0</div><div class="lbl">❌ Erreurs</div></div>
+                <div class="fm-stat"><div class="num" id="fm_s_skipped"  style="color:#fbbf24">0</div><div class="lbl">⏭ Ignorés</div></div>
+                <div class="fm-stat"><div class="num" id="fm_s_remaining"style="color:#60a5fa">0</div><div class="lbl">⏳ Restants</div></div>
+            </div>
+            <div class="fm-progress-wrap"><div class="fm-progress-bar" id="fm_progress_bar"></div></div>
+            <div class="fm-current" id="fm_current">En attente…</div>
+            <div class="fm-log" id="fm_log"><div class="fm-log-empty" id="fm_log_empty">Le log apparaîtra ici…</div></div>
+        </div>
+
+        </div><!-- .fm-body -->
+        </div><!-- #fth-marathon-wrap -->
+
+        <script>
+        (function() {
+            'use strict';
+
+            var AJAX_URL  = <?php echo json_encode($ajax_url); ?>;
+            var NONCE     = <?php echo json_encode($nonce); ?>;
+            var ALL_CITIES   = <?php echo json_encode(array_values($js_cities)); ?>;
+            var ALL_COUNTRIES= <?php echo json_encode(array_values($js_countries)); ?>;
+            var WORLD_CITIES = <?php echo json_encode($world_cities); ?>;
+
+            var currentMode = 'city';
+            var currentType = 'both';
+            var stopped     = false;
+            var running     = false;
+
+            var imported = 0, errors = 0, skipped = 0, remaining = 0, discovered = 0;
+
+            // ── DOM refs ──────────────────────────────────────────────
+            var startBtn      = document.getElementById('fm_start');
+            var stopBtn       = document.getElementById('fm_stop');
+            var resetBtn      = document.getElementById('fm_reset');
+            var progressCard  = document.getElementById('fm-progress-card');
+            var progressBar   = document.getElementById('fm_progress_bar');
+            var currentSpan   = document.getElementById('fm_current');
+            var phaseSpan     = document.getElementById('fm_phase');
+            var logEl         = document.getElementById('fm_log');
+            var logEmpty      = document.getElementById('fm_log_empty');
+            var sImported     = document.getElementById('fm_s_imported');
+            var sErrors       = document.getElementById('fm_s_errors');
+            var sSkipped      = document.getElementById('fm_s_skipped');
+            var sRemaining    = document.getElementById('fm_s_remaining');
+
+            // ── Mode buttons ──────────────────────────────────────────
+            document.querySelectorAll('.fm-mode-btn').forEach(function(btn) {
+                btn.addEventListener('click', function() {
+                    if (running) return;
+                    document.querySelectorAll('.fm-mode-btn').forEach(function(b){ b.classList.remove('active'); });
+                    btn.classList.add('active');
+                    currentMode = btn.dataset.mode;
+                    ['city','country','allcities','world'].forEach(function(m){
+                        var el = document.getElementById('fm-scope-' + m);
+                        if (el) el.classList.toggle('fm-panel-hidden', m !== currentMode);
+                    });
+                });
+            });
+
+            // ── Type buttons ──────────────────────────────────────────
+            document.querySelectorAll('.fm-type-btn').forEach(function(btn) {
+                btn.addEventListener('click', function() {
+                    if (running) return;
+                    document.querySelectorAll('.fm-type-btn').forEach(function(b){ b.classList.remove('active'); });
+                    btn.classList.add('active');
+                    currentType = btn.dataset.type;
+                });
+            });
+
+            // ── Stop / Reset ──────────────────────────────────────────
+            stopBtn.addEventListener('click', function() {
+                stopped = true;
+                stopBtn.style.display = 'none';
+                log('⏹ Arrêt demandé — attente de la fin du téléchargement en cours…', '#fbbf24');
+            });
+            resetBtn.addEventListener('click', function() {
+                if (running && !confirm('L\'import est en cours. Vraiment réinitialiser ?')) return;
+                stopped = true; running = false;
+                imported = errors = skipped = remaining = discovered = 0;
+                updateStats();
+                progressBar.style.width = '0%';
+                currentSpan.textContent = 'En attente…';
+                logEl.innerHTML = '<div class="fm-log-empty" id="fm_log_empty">Le log apparaîtra ici…</div>';
+                logEmpty = document.getElementById('fm_log_empty');
+                progressCard.style.display = 'none';
+                startBtn.disabled = false; startBtn.textContent = '🚀 Lancer le Marathon';
+                stopBtn.style.display = 'none';
+                phaseSpan.textContent = '';
+            });
+
+            // ── AJAX helper ───────────────────────────────────────────
+            function ajaxPost(data) {
+                return new Promise(function(resolve) {
+                    var fd = new FormData();
+                    Object.keys(data).forEach(function(k){ fd.append(k, data[k]); });
+                    fetch(AJAX_URL, { method: 'POST', body: fd, credentials: 'same-origin' })
+                        .then(function(r){ return r.json(); })
+                        .then(resolve)
+                        .catch(function(e){ resolve({success: false, data: {message: e.message}}); });
+                });
+            }
+
+            // ── Logging ───────────────────────────────────────────────
+            function ts() {
+                var d = new Date();
+                return ('0'+d.getHours()).slice(-2)+':'+('0'+d.getMinutes()).slice(-2)+':'+('0'+d.getSeconds()).slice(-2);
+            }
+            function log(msg, color) {
+                if (logEmpty) { logEmpty.remove(); logEmpty = null; }
+                var item = document.createElement('div');
+                item.className = 'fm-log-item';
+                item.innerHTML = '<span class="fm-log-ts">' + ts() + '</span><span style="' + (color ? 'color:'+color : '') + '">' + escHtml(msg) + '</span>';
+                logEl.insertBefore(item, logEl.firstChild);
+            }
+            function escHtml(s) {
+                return String(s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;');
+            }
+            function updateStats() {
+                sImported.textContent  = imported;
+                sErrors.textContent    = errors;
+                sSkipped.textContent   = skipped;
+                sRemaining.textContent = remaining;
+                if (discovered > 0) {
+                    var pct = Math.round((imported + errors + skipped) / discovered * 100);
+                    progressBar.style.width = Math.min(pct, 100) + '%';
+                }
+            }
+
+            // ── Build city queue ──────────────────────────────────────
+            function buildCityQueue() {
+                var queue = [];
+                if (currentMode === 'city') {
+                    var sel = document.getElementById('fm_city_select');
+                    var manUrl = (document.getElementById('fm_city_url').value || '').trim();
+                    if (manUrl) {
+                        queue.push({name: manUrl.replace(/^https?:\/\/[^\/]+/,'').replace(/\/+$/,''), slug: '', url: manUrl, id: 0, country_id: 0});
+                    } else if (sel && sel.value) {
+                        var opt = sel.options[sel.selectedIndex];
+                        queue.push({name: opt.dataset.name, slug: opt.dataset.slug, url: opt.dataset.url, id: parseInt(sel.value)||0, country_id: 0});
+                    }
+                } else if (currentMode === 'country') {
+                    var csel = document.getElementById('fm_country_select');
+                    if (csel && csel.value) {
+                        var cid = parseInt(csel.value);
+                        ALL_COUNTRIES.forEach(function(co){ if (co.id === cid) { queue = co.cities.slice(); } });
+                    }
+                } else if (currentMode === 'allcities') {
+                    queue = ALL_CITIES.slice();
+                } else if (currentMode === 'world') {
+                    WORLD_CITIES.forEach(function(wc){
+                        queue.push({name: wc.name, slug: wc.slug, url: wc.url, id: 0, country_id: 0});
+                    });
+                }
+                return queue;
+            }
+
+            // ── Main marathon runner ──────────────────────────────────
+            startBtn.addEventListener('click', async function() {
+                if (running) return;
+                var cityQueue = buildCityQueue();
+                if (!cityQueue.length) { alert('Veuillez sélectionner une ville ou un pays.'); return; }
+
+                stopped  = false; running = true;
+                imported = errors = skipped = remaining = discovered = 0;
+                updateStats();
+                progressCard.style.display = '';
+                startBtn.disabled = true; startBtn.textContent = '⏳ En cours…';
+                stopBtn.style.display = '';
+                progressBar.style.width = '0%';
+                logEl.innerHTML = '';
+
+                var wpCity    = document.getElementById('fm_wp_city').value    || '';
+                var wpCountry = document.getElementById('fm_wp_country').value || '';
+                var types     = currentType === 'both' ? ['activity','hotel'] : [currentType];
+
+                for (var ci = 0; ci < cityQueue.length && !stopped; ci++) {
+                    var cityInfo = cityQueue[ci];
+                    phaseSpan.textContent = 'Ville ' + (ci+1) + '/' + cityQueue.length + ' — ' + cityInfo.name;
+
+                    for (var ti = 0; ti < types.length && !stopped; ti++) {
+                        var type = types[ti];
+                        var klookUrl = cityInfo.url;
+                        // For hotel mode, swap to hotel tab if URL is activity tab
+                        if (type === 'hotel' && klookUrl.indexOf('1-things-to-do') !== -1) {
+                            klookUrl = klookUrl.replace('1-things-to-do', '3-hotel');
+                        }
+
+                        currentSpan.textContent = '🔍 Découverte des ' + (type === 'hotel' ? 'hôtels' : 'activités') + ' pour ' + cityInfo.name + '…';
+                        log('🔍 Découverte ' + type + 's — ' + cityInfo.name, '#60a5fa');
+
+                        var discRes = await ajaxPost({
+                            action: 'fth_discover_import_urls',
+                            url:    klookUrl,
+                            type:   type,
+                            city:   cityInfo.id || '',
+                            limit:  200,
+                            nonce:  NONCE
+                        });
+
+                        if (!discRes.success || !discRes.data || !discRes.data.urls || !discRes.data.urls.length) {
+                            var msg = discRes.data && discRes.data.message ? discRes.data.message : 'Aucun résultat';
+                            log('⚠️ ' + cityInfo.name + ' (' + type + '): ' + msg, '#fbbf24');
+                            continue;
+                        }
+
+                        var urls = discRes.data.urls;
+                        skipped += discRes.data.skipped || 0;
+                        discovered += urls.length;
+                        remaining   = urls.length;
+                        updateStats();
+                        log('✅ ' + urls.length + ' ' + type + '(s) trouvés pour ' + cityInfo.name, '#34d399');
+
+                        for (var ui = 0; ui < urls.length && !stopped; ui++) {
+                            var itemUrl = urls[ui];
+                            remaining = urls.length - ui;
+                            currentSpan.textContent = '⬇️ Import ' + (ui+1) + '/' + urls.length + ' — ' + itemUrl.split('/').slice(-2,-1)[0];
+                            updateStats();
+
+                            var useCity    = cityInfo.id    || wpCity    || '';
+                            var useCountry = cityInfo.country_id || wpCountry || '';
+
+                            var impRes = await ajaxPost({
+                                action:  'fth_import_single_live',
+                                url:     itemUrl,
+                                type:    type,
+                                city:    useCity,
+                                country: useCountry,
+                                category:'',
+                                publish: 1,
+                                nonce:   NONCE
+                            });
+
+                            if (impRes && impRes.success) {
+                                imported++;
+                                log('✅ ' + (impRes.data && impRes.data.title ? impRes.data.title : itemUrl));
+                            } else {
+                                errors++;
+                                var errMsg = (impRes && impRes.data && impRes.data.message) ? impRes.data.message : 'Échec';
+                                log('❌ ' + itemUrl.split('/').slice(-2,-1)[0] + ' — ' + errMsg, '#f87171');
+                            }
+                            updateStats();
+                        }
+                        remaining = 0;
+                        updateStats();
+                    }
+                }
+
+                // Done
+                running = false;
+                startBtn.disabled = false; startBtn.textContent = '🚀 Lancer le Marathon';
+                stopBtn.style.display = 'none';
+                progressBar.style.width = '100%';
+                if (stopped) {
+                    currentSpan.textContent = '⏹ Arrêté — ' + imported + ' importés, ' + errors + ' erreurs';
+                    log('⏹ Marathon arrêté manuellement.', '#fbbf24');
+                } else {
+                    currentSpan.textContent = '🎉 Terminé — ' + imported + ' importés, ' + errors + ' erreurs, ' + skipped + ' ignorés';
+                    log('🎉 Marathon terminé ! ' + imported + ' importés, ' + errors + ' erreurs.', '#34d399');
+                    phaseSpan.textContent = 'Terminé';
+                }
+            });
+
+        })();
         </script>
         <?php
     }
