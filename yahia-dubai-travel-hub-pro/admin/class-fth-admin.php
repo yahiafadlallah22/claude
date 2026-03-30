@@ -209,193 +209,235 @@ class FTH_Admin {
      */
     public static function dashboard_page() {
         $primary_color = Flavor_Travel_Hub::get_primary_color();
-        
-        // Get stats
-        $activities_count = wp_count_posts('travel_activity')->publish;
+
+        // Stats
+        $activities_count   = wp_count_posts('travel_activity')->publish;
+        $hotels_count       = wp_count_posts('travel_hotel')->publish;
         $destinations_count = wp_count_posts('travel_destination')->publish;
-        $hotels_count = wp_count_posts('travel_hotel')->publish;
-        $countries = FTH_Taxonomies::get_countries();
-        $cities = FTH_Taxonomies::get_cities();
-        $categories = FTH_Taxonomies::get_categories();
-        
-        // Get recent activities
-        $recent_activities = get_posts(array(
-            'post_type'      => 'travel_activity',
-            'posts_per_page' => 5,
-            'orderby'        => 'date',
-            'order'          => 'DESC',
-        ));
+        $countries_list     = get_terms(array('taxonomy' => 'travel_country', 'hide_empty' => false));
+        $cities_list        = get_terms(array('taxonomy' => 'travel_city',    'hide_empty' => false));
+        $categories_list    = get_terms(array('taxonomy' => 'travel_category','hide_empty' => false));
+        $countries_list     = is_wp_error($countries_list) ? array() : $countries_list;
+        $cities_list        = is_wp_error($cities_list)    ? array() : $cities_list;
+        $categories_list    = is_wp_error($categories_list)? array() : $categories_list;
+
+        // Recent imports
+        $recent_activities = get_posts(array('post_type'=>'travel_activity','posts_per_page'=>6,'orderby'=>'date','order'=>'DESC'));
+        $recent_hotels     = get_posts(array('post_type'=>'travel_hotel',   'posts_per_page'=>4,'orderby'=>'date','order'=>'DESC'));
+
+        // Static hub pages (slug => label)
+        $static_hubs = array(
+            'things-to-do' => array('label' => '🗺 Things To Do',    'icon' => '🗺'),
+            'hotels'        => array('label' => '🏨 Hotels',          'icon' => '🏨'),
+            'passes'        => array('label' => '🎟 Passes & Tickets', 'icon' => '🎟'),
+            'blog'          => array('label' => '📝 Blog',            'icon' => '📝'),
+        );
         ?>
-        <div class="wrap fth-admin-wrap">
-            <h1 class="fth-admin-title">
-                <span class="dashicons dashicons-palmtree" style="color: <?php echo esc_attr($primary_color); ?>;"></span>
-                Travel Hub Dashboard
-            </h1>
-            
-            <div class="notice notice-info" style="padding:12px 16px;border-left-color: <?php echo esc_attr($primary_color); ?>;">
-                <p style="margin:0 0 8px;"><strong>Quick start</strong></p>
-                <ol style="margin:0 0 0 18px;">
-                    <li>Open <strong>Settings</strong> and confirm your affiliate ID, ScraperAPI key, brand colors and brand name.</li>
-                    <li>Open <strong>🚀 Import Klook</strong> to import a city, attractions/tours, or a hotel listing.</li>
-                    <li>Check the generated content under <strong>Activities</strong>, <strong>Hotels</strong>, <strong>Cities</strong>, and <strong>Countries</strong>.</li>
-                    <li>Use <strong>Tools</strong> to regenerate hubs or clean generated hub pages if you want to rebuild from scratch.</li>
-                </ol>
+        <div class="wrap" style="font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif;max-width:1400px;">
+        <h1 style="display:flex;align-items:center;gap:10px;margin-bottom:20px;">
+            <span style="font-size:28px;">🌴</span>
+            Travel Hub Dashboard
+            <span style="font-size:12px;font-weight:400;color:#666;background:#f0f0f1;padding:3px 10px;border-radius:20px;">v<?php echo FTH_VERSION; ?></span>
+        </h1>
+
+        <!-- Quick links row -->
+        <div style="display:flex;gap:10px;flex-wrap:wrap;margin-bottom:24px;">
+            <a href="<?php echo admin_url('admin.php?page=fth-klook-import'); ?>" style="background:linear-gradient(135deg,#2575fc,#6a11cb);color:#fff;padding:10px 20px;border-radius:8px;text-decoration:none;font-weight:700;font-size:13px;">🚀 Import from Klook</a>
+            <a href="<?php echo admin_url('admin.php?page=fth-klook-links'); ?>" style="background:#1e3a5f;color:#fff;padding:10px 20px;border-radius:8px;text-decoration:none;font-weight:700;font-size:13px;">🔗 Klook Links Library</a>
+            <a href="<?php echo admin_url('admin.php?page=fth-settings'); ?>" style="background:#fff;color:#333;border:1px solid #ddd;padding:10px 20px;border-radius:8px;text-decoration:none;font-weight:600;font-size:13px;">⚙️ Settings</a>
+            <a href="<?php echo admin_url('admin.php?page=fth-tools'); ?>" style="background:#fff;color:#333;border:1px solid #ddd;padding:10px 20px;border-radius:8px;text-decoration:none;font-weight:600;font-size:13px;">🔧 Tools</a>
+        </div>
+
+        <!-- Stats bar -->
+        <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(130px,1fr));gap:12px;margin-bottom:28px;">
+            <?php
+            $stat_cards = array(
+                array('🎟', $activities_count, 'Activities',   admin_url('edit.php?post_type=travel_activity'), '#2575fc'),
+                array('🏨', $hotels_count,     'Hotels',       admin_url('edit.php?post_type=travel_hotel'),    '#0e9f6e'),
+                array('🗺', $destinations_count,'Destinations',admin_url('edit.php?post_type=travel_destination'),'#e3a008'),
+                array('🏙', count($cities_list),'Cities',      admin_url('edit-tags.php?taxonomy=travel_city'), '#7c3aed'),
+                array('🌍', count($countries_list),'Countries',admin_url('edit-tags.php?taxonomy=travel_country'),'#dc2626'),
+                array('🏷', count($categories_list),'Categories',admin_url('edit-tags.php?taxonomy=travel_category'),'#d97706'),
+            );
+            foreach ($stat_cards as list($icon,$num,$label,$href,$clr)): ?>
+            <a href="<?php echo esc_url($href); ?>" style="text-decoration:none;background:#fff;border:1px solid #e5e7eb;border-radius:10px;padding:16px 12px;text-align:center;box-shadow:0 1px 3px rgba(0,0,0,.06);transition:box-shadow .2s;" onmouseover="this.style.boxShadow='0 4px 12px rgba(0,0,0,.12)'" onmouseout="this.style.boxShadow='0 1px 3px rgba(0,0,0,.06)'">
+                <div style="font-size:24px;"><?php echo $icon; ?></div>
+                <div style="font-size:28px;font-weight:800;color:<?php echo $clr; ?>;line-height:1.1;"><?php echo number_format((int)$num); ?></div>
+                <div style="font-size:11px;color:#666;font-weight:600;margin-top:2px;"><?php echo $label; ?></div>
+            </a>
+            <?php endforeach; ?>
+        </div>
+
+        <div style="display:grid;grid-template-columns:1fr 1fr;gap:20px;margin-bottom:24px;">
+
+        <!-- Hub Pages Overview -->
+        <div style="background:#fff;border:1px solid #e5e7eb;border-radius:12px;padding:20px;box-shadow:0 1px 3px rgba(0,0,0,.06);">
+            <h2 style="margin:0 0 16px;font-size:15px;font-weight:800;display:flex;align-items:center;gap:8px;">🌐 Hub Pages <span style="font-size:11px;font-weight:400;color:#888;">All auto-generated public pages</span></h2>
+
+            <!-- Static pages -->
+            <div style="margin-bottom:14px;">
+                <div style="font-size:11px;font-weight:700;color:#888;text-transform:uppercase;letter-spacing:.5px;margin-bottom:8px;">Static Hubs</div>
+                <?php foreach ($static_hubs as $slug => $meta):
+                    $page = get_page_by_path($slug);
+                    $url  = $page ? get_permalink($page->ID) : home_url('/' . $slug . '/');
+                    $status = $page ? $page->post_status : 'missing';
+                    $status_dot = $status === 'publish' ? '#0e9f6e' : ($status === 'draft' ? '#e3a008' : '#dc2626');
+                    $status_lbl = $status === 'publish' ? 'Live' : ($status === 'draft' ? 'Draft' : 'Missing');
+                ?>
+                <div style="display:flex;align-items:center;gap:8px;padding:7px 0;border-bottom:1px solid #f3f4f6;">
+                    <span style="font-size:16px;"><?php echo $meta['icon']; ?></span>
+                    <span style="flex:1;font-size:13px;font-weight:600;"><?php echo esc_html($meta['label']); ?></span>
+                    <span style="font-size:10px;font-weight:700;color:<?php echo $status_dot; ?>;background:<?php echo $status_dot; ?>20;padding:2px 8px;border-radius:20px;"><?php echo $status_lbl; ?></span>
+                    <?php if ($page): ?>
+                    <a href="<?php echo esc_url(get_edit_post_link($page->ID)); ?>" style="font-size:11px;color:#888;" title="Edit">✏️</a>
+                    <?php endif; ?>
+                    <a href="<?php echo esc_url($url); ?>" target="_blank" style="font-size:11px;color:#2575fc;" title="View">↗</a>
+                </div>
+                <?php endforeach; ?>
             </div>
 
-            <div class="fth-admin-stats">
-                <div class="fth-stat-card">
-                    <div class="fth-stat-icon" style="background-color: <?php echo esc_attr($primary_color); ?>20; color: <?php echo esc_attr($primary_color); ?>;">
-                        <span class="dashicons dashicons-tickets-alt"></span>
-                    </div>
-                    <div class="fth-stat-content">
-                        <span class="fth-stat-number"><?php echo esc_html($activities_count); ?></span>
-                        <span class="fth-stat-label">Activities</span>
-                    </div>
-                    <a href="<?php echo admin_url('edit.php?post_type=travel_activity'); ?>" class="fth-stat-link">View All</a>
-                </div>
-                
-                <div class="fth-stat-card">
-                    <div class="fth-stat-icon" style="background-color: #e74c3c20; color: #e74c3c;">
-                        <span class="dashicons dashicons-location-alt"></span>
-                    </div>
-                    <div class="fth-stat-content">
-                        <span class="fth-stat-number"><?php echo esc_html($destinations_count); ?></span>
-                        <span class="fth-stat-label">Destinations</span>
-                    </div>
-                    <a href="<?php echo admin_url('edit.php?post_type=travel_destination'); ?>" class="fth-stat-link">View All</a>
-                </div>
-                
-                <div class="fth-stat-card">
-                    <div class="fth-stat-icon" style="background-color: #3498db20; color: #3498db;">
-                        <span class="dashicons dashicons-admin-site-alt3"></span>
-                    </div>
-                    <div class="fth-stat-content">
-                        <span class="fth-stat-number"><?php echo count($cities); ?></span>
-                        <span class="fth-stat-label">Cities</span>
-                    </div>
-                    <a href="<?php echo admin_url('edit-tags.php?taxonomy=travel_city'); ?>" class="fth-stat-link">View All</a>
-                </div>
-                
-                <div class="fth-stat-card">
-                    <div class="fth-stat-icon" style="background-color: #9b59b620; color: #9b59b6;">
-                        <span class="dashicons dashicons-flag"></span>
-                    </div>
-                    <div class="fth-stat-content">
-                        <span class="fth-stat-number"><?php echo count($countries); ?></span>
-                        <span class="fth-stat-label">Countries</span>
-                    </div>
-                    <a href="<?php echo admin_url('edit-tags.php?taxonomy=travel_country'); ?>" class="fth-stat-link">View All</a>
-                </div>
-                
-                <div class="fth-stat-card">
-                    <div class="fth-stat-icon" style="background-color: #f39c1220; color: #f39c12;">
-                        <span class="dashicons dashicons-category"></span>
-                    </div>
-                    <div class="fth-stat-content">
-                        <span class="fth-stat-number"><?php echo count($categories); ?></span>
-                        <span class="fth-stat-label">Categories</span>
-                    </div>
-                    <a href="<?php echo admin_url('edit-tags.php?taxonomy=travel_category'); ?>" class="fth-stat-link">View All</a>
-                </div>
-                
-                <div class="fth-stat-card">
-                    <div class="fth-stat-icon" style="background-color: #1abc9c20; color: #1abc9c;">
-                        <span class="dashicons dashicons-building"></span>
-                    </div>
-                    <div class="fth-stat-content">
-                        <span class="fth-stat-number"><?php echo esc_html($hotels_count); ?></span>
-                        <span class="fth-stat-label">Hotels</span>
-                    </div>
-                    <a href="<?php echo admin_url('edit.php?post_type=travel_hotel'); ?>" class="fth-stat-link">View All</a>
-                </div>
-            </div>
-            
-            <div class="fth-admin-grid">
-                <div class="fth-admin-panel">
-                    <h2>Quick Actions</h2>
-                    <div class="fth-quick-actions">
-                        <a href="<?php echo admin_url('post-new.php?post_type=travel_activity'); ?>" class="button button-primary">
-                            <span class="dashicons dashicons-plus-alt"></span> Add Activity
-                        </a>
-                        <a href="<?php echo admin_url('post-new.php?post_type=travel_destination'); ?>" class="button button-primary">
-                            <span class="dashicons dashicons-plus-alt"></span> Add Destination
-                        </a>
-                        <a href="<?php echo admin_url('edit-tags.php?taxonomy=travel_city'); ?>" class="button">
-                            <span class="dashicons dashicons-plus-alt"></span> Add City
-                        </a>
-                        <a href="<?php echo admin_url('admin.php?page=fth-settings'); ?>" class="button">
-                            <span class="dashicons dashicons-admin-settings"></span> Settings
-                        </a>
-                    </div>
-                </div>
-                
-                <div class="fth-admin-panel">
-                    <h2>Recent Activities</h2>
-                    <?php if ($recent_activities) : ?>
-                        <ul class="fth-recent-list">
-                            <?php foreach ($recent_activities as $activity) : ?>
-                                <li>
-                                    <a href="<?php echo get_edit_post_link($activity->ID); ?>">
-                                        <?php echo esc_html($activity->post_title); ?>
-                                    </a>
-                                    <span class="fth-recent-date"><?php echo get_the_date('M j, Y', $activity); ?></span>
-                                </li>
-                            <?php endforeach; ?>
-                        </ul>
-                    <?php else : ?>
-                        <p>No activities yet. <a href="<?php echo admin_url('post-new.php?post_type=travel_activity'); ?>">Create your first activity</a></p>
+            <!-- City hub pages -->
+            <?php if (!empty($cities_list)): ?>
+            <div style="margin-bottom:14px;">
+                <div style="font-size:11px;font-weight:700;color:#888;text-transform:uppercase;letter-spacing:.5px;margin-bottom:8px;">City Hubs (<?php echo count($cities_list); ?>)</div>
+                <div style="max-height:200px;overflow-y:auto;">
+                <?php foreach ($cities_list as $city):
+                    $city_url  = get_term_link($city);
+                    $act_count = $city->count;
+                ?>
+                <div style="display:flex;align-items:center;gap:8px;padding:5px 0;border-bottom:1px solid #f3f4f6;">
+                    <span style="font-size:13px;">🏙</span>
+                    <span style="flex:1;font-size:12px;font-weight:600;"><?php echo esc_html($city->name); ?></span>
+                    <span style="font-size:10px;color:#888;"><?php echo $act_count; ?> posts</span>
+                    <a href="<?php echo esc_url(admin_url('edit-tags.php?action=edit&taxonomy=travel_city&tag_ID=' . $city->term_id)); ?>" style="font-size:11px;color:#888;" title="Edit">✏️</a>
+                    <?php if (!is_wp_error($city_url)): ?>
+                    <a href="<?php echo esc_url($city_url); ?>" target="_blank" style="font-size:11px;color:#2575fc;" title="View">↗</a>
                     <?php endif; ?>
                 </div>
-                
-                <div class="fth-admin-panel">
-                    <h2>Shortcodes</h2>
-                    <div class="fth-shortcode-list">
-                        <div class="fth-shortcode-item">
-                            <code>[fth_travel_hub]</code>
-                            <span>Main travel hub page with search, cities, and featured activities</span>
-                        </div>
-                        <div class="fth-shortcode-item">
-                            <code>[fth_search_form]</code>
-                            <span>Search form only</span>
-                        </div>
-                        <div class="fth-shortcode-item">
-                            <code>[fth_featured_activities count="6"]</code>
-                            <span>Featured activities grid</span>
-                        </div>
-                        <div class="fth-shortcode-item">
-                            <code>[fth_featured_cities count="6"]</code>
-                            <span>Popular cities grid</span>
-                        </div>
-                        <div class="fth-shortcode-item">
-                            <code>[fth_categories]</code>
-                            <span>Categories grid</span>
-                        </div>
-                        <div class="fth-shortcode-item">
-                            <code>[fth_city_activities city="dubai"]</code>
-                            <span>Activities for a specific city</span>
-                        </div>
-                    </div>
-                </div>
-                
-                <div class="fth-admin-panel">
-                    <h2>Pages & Links</h2>
-                    <ul class="fth-links-list">
-                        <li>
-                            <strong>Main Hub:</strong>
-                            <a href="<?php echo home_url('/things-to-do/'); ?>" target="_blank"><?php echo home_url('/things-to-do/'); ?></a>
-                        </li>
-                        <li>
-                            <strong>All Activities:</strong>
-                            <a href="<?php echo get_post_type_archive_link('travel_activity'); ?>" target="_blank">View Archive</a>
-                        </li>
-                        <li>
-                            <strong>All Destinations:</strong>
-                            <a href="<?php echo get_post_type_archive_link('travel_destination'); ?>" target="_blank">View Archive</a>
-                        </li>
-                    </ul>
+                <?php endforeach; ?>
                 </div>
             </div>
+            <?php endif; ?>
+
+            <!-- Country hub pages -->
+            <?php if (!empty($countries_list)): ?>
+            <div style="margin-bottom:14px;">
+                <div style="font-size:11px;font-weight:700;color:#888;text-transform:uppercase;letter-spacing:.5px;margin-bottom:8px;">Country Hubs (<?php echo count($countries_list); ?>)</div>
+                <div style="max-height:140px;overflow-y:auto;">
+                <?php foreach ($countries_list as $country):
+                    $country_url = get_term_link($country);
+                    $flag = FTH_Templates::get_country_flag($country->name);
+                ?>
+                <div style="display:flex;align-items:center;gap:8px;padding:5px 0;border-bottom:1px solid #f3f4f6;">
+                    <span style="font-size:13px;"><?php echo $flag; ?></span>
+                    <span style="flex:1;font-size:12px;font-weight:600;"><?php echo esc_html($country->name); ?></span>
+                    <span style="font-size:10px;color:#888;"><?php echo $country->count; ?> posts</span>
+                    <a href="<?php echo esc_url(admin_url('edit-tags.php?action=edit&taxonomy=travel_country&tag_ID=' . $country->term_id)); ?>" style="font-size:11px;color:#888;" title="Edit">✏️</a>
+                    <?php if (!is_wp_error($country_url)): ?>
+                    <a href="<?php echo esc_url($country_url); ?>" target="_blank" style="font-size:11px;color:#2575fc;" title="View">↗</a>
+                    <?php endif; ?>
+                </div>
+                <?php endforeach; ?>
+                </div>
+            </div>
+            <?php endif; ?>
+
+            <!-- Category hub pages -->
+            <?php if (!empty($categories_list)): ?>
+            <div>
+                <div style="font-size:11px;font-weight:700;color:#888;text-transform:uppercase;letter-spacing:.5px;margin-bottom:8px;">Category Hubs (<?php echo count($categories_list); ?>)</div>
+                <div style="max-height:140px;overflow-y:auto;">
+                <?php foreach ($categories_list as $cat):
+                    $cat_url = get_term_link($cat);
+                    $emoji   = FTH_Templates::get_category_emoji($cat);
+                ?>
+                <div style="display:flex;align-items:center;gap:8px;padding:5px 0;border-bottom:1px solid #f3f4f6;">
+                    <span style="font-size:13px;"><?php echo $emoji; ?></span>
+                    <span style="flex:1;font-size:12px;font-weight:600;"><?php echo esc_html($cat->name); ?></span>
+                    <span style="font-size:10px;color:#888;"><?php echo $cat->count; ?> posts</span>
+                    <a href="<?php echo esc_url(admin_url('edit-tags.php?action=edit&taxonomy=travel_category&tag_ID=' . $cat->term_id)); ?>" style="font-size:11px;color:#888;" title="Edit">✏️</a>
+                    <?php if (!is_wp_error($cat_url)): ?>
+                    <a href="<?php echo esc_url($cat_url); ?>" target="_blank" style="font-size:11px;color:#2575fc;" title="View">↗</a>
+                    <?php endif; ?>
+                </div>
+                <?php endforeach; ?>
+                </div>
+            </div>
+            <?php endif; ?>
         </div>
+
+        <!-- Right column: Recent + Shortcodes -->
+        <div style="display:flex;flex-direction:column;gap:20px;">
+
+            <!-- Recent Activities -->
+            <div style="background:#fff;border:1px solid #e5e7eb;border-radius:12px;padding:20px;box-shadow:0 1px 3px rgba(0,0,0,.06);">
+                <h2 style="margin:0 0 12px;font-size:15px;font-weight:800;">🎟 Recent Activities</h2>
+                <?php if ($recent_activities): ?>
+                <div style="display:flex;flex-direction:column;gap:6px;">
+                    <?php foreach ($recent_activities as $act):
+                        $price = get_post_meta($act->ID, '_fth_price', true);
+                        $city_terms = wp_get_post_terms($act->ID, 'travel_city', array('fields'=>'names'));
+                        $city_lbl = !empty($city_terms) ? $city_terms[0] : '';
+                    ?>
+                    <div style="display:flex;align-items:center;gap:8px;padding:7px 0;border-bottom:1px solid #f3f4f6;">
+                        <span style="flex:1;font-size:12px;font-weight:600;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;max-width:220px;">
+                            <a href="<?php echo get_edit_post_link($act->ID); ?>" style="color:#333;text-decoration:none;"><?php echo esc_html($act->post_title); ?></a>
+                        </span>
+                        <?php if ($city_lbl): ?><span style="font-size:10px;color:#888;"><?php echo esc_html($city_lbl); ?></span><?php endif; ?>
+                        <?php if ($price): ?><span style="font-size:11px;font-weight:700;color:#0e9f6e;"><?php echo esc_html($price); ?></span><?php endif; ?>
+                        <a href="<?php echo get_permalink($act->ID); ?>" target="_blank" style="font-size:11px;color:#2575fc;">↗</a>
+                    </div>
+                    <?php endforeach; ?>
+                </div>
+                <?php else: ?>
+                <p style="color:#888;font-size:13px;">No activities yet. <a href="<?php echo admin_url('admin.php?page=fth-klook-import'); ?>">Import from Klook</a></p>
+                <?php endif; ?>
+            </div>
+
+            <!-- Recent Hotels -->
+            <?php if (!empty($recent_hotels)): ?>
+            <div style="background:#fff;border:1px solid #e5e7eb;border-radius:12px;padding:20px;box-shadow:0 1px 3px rgba(0,0,0,.06);">
+                <h2 style="margin:0 0 12px;font-size:15px;font-weight:800;">🏨 Recent Hotels</h2>
+                <div style="display:flex;flex-direction:column;gap:6px;">
+                    <?php foreach ($recent_hotels as $htl):
+                        $stars = get_post_meta($htl->ID, '_fth_stars', true);
+                        $price = get_post_meta($htl->ID, '_fth_price', true);
+                    ?>
+                    <div style="display:flex;align-items:center;gap:8px;padding:7px 0;border-bottom:1px solid #f3f4f6;">
+                        <span style="flex:1;font-size:12px;font-weight:600;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;max-width:220px;">
+                            <a href="<?php echo get_edit_post_link($htl->ID); ?>" style="color:#333;text-decoration:none;"><?php echo esc_html($htl->post_title); ?></a>
+                        </span>
+                        <?php if ($price): ?><span style="font-size:11px;font-weight:700;color:#0e9f6e;"><?php echo esc_html($price); ?></span><?php endif; ?>
+                        <a href="<?php echo get_permalink($htl->ID); ?>" target="_blank" style="font-size:11px;color:#2575fc;">↗</a>
+                    </div>
+                    <?php endforeach; ?>
+                </div>
+            </div>
+            <?php endif; ?>
+
+            <!-- Shortcodes reference -->
+            <div style="background:#fff;border:1px solid #e5e7eb;border-radius:12px;padding:20px;box-shadow:0 1px 3px rgba(0,0,0,.06);">
+                <h2 style="margin:0 0 12px;font-size:15px;font-weight:800;">📋 Shortcodes</h2>
+                <?php
+                $shortcodes = array(
+                    '[fth_travel_hub]'                   => 'Main hub (search + cities + activities)',
+                    '[fth_featured_activities count="6"]' => 'Featured activities grid',
+                    '[fth_featured_cities count="6"]'     => 'Popular cities grid',
+                    '[fth_categories]'                    => 'Category icons grid',
+                    '[fth_city_activities city="dubai"]'  => 'City-specific activity grid',
+                    '[fth_search_form]'                   => 'Search bar only',
+                );
+                foreach ($shortcodes as $sc => $desc): ?>
+                <div style="display:flex;gap:10px;align-items:flex-start;padding:6px 0;border-bottom:1px solid #f3f4f6;">
+                    <code style="font-size:11px;background:#f0f0f1;padding:2px 6px;border-radius:4px;white-space:nowrap;flex-shrink:0;"><?php echo esc_html($sc); ?></code>
+                    <span style="font-size:11px;color:#666;"><?php echo esc_html($desc); ?></span>
+                </div>
+                <?php endforeach; ?>
+            </div>
+
+        </div><!-- /right col -->
+        </div><!-- /grid -->
+        </div><!-- /wrap -->
         <?php
     }
     
