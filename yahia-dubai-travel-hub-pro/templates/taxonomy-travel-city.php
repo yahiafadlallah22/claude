@@ -149,7 +149,7 @@ body.tax-travel_city .widget-area,body.tax-travel_city .sidebar,body.tax-travel_
       <?php foreach ($city_faq_blocks as $block):
         if (preg_match('/^Q:\s*(.+)/u', $block, $mq) && preg_match('/\nA:\s*(.+)/us', $block, $ma)): ?>
         <div class="klc-faq-item">
-          <div class="klc-faq-q" onclick="this.parentElement.classList.toggle('open')">
+          <div class="klc-faq-q">
             <span><?php echo esc_html($mq[1]); ?></span>
             <span class="klc-faq-arrow">▼</span>
           </div>

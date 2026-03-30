@@ -1687,131 +1687,142 @@ class FTH_Admin {
         });
 
 // ── Marathon Import ──────────────────────────────────────────────────
-jQuery(document).ready(function($) {
-// Auto-prefill from Klook Links Library
-(function() {
-    var p = new URLSearchParams(window.location.search);
-    if (p.get('fthll_prefill_url')) {
-        var u = p.get('fthll_prefill_url');
-        var tp = p.get('fthll_prefill_type') || 'activity';
-        var city = p.get('fthll_prefill_city') || '';
-        var country = p.get('fthll_prefill_country') || '';
-        $('#fth_marathon_url').val(u);
-        if (tp && $('#fth_marathon_type option[value="'+tp+'"]').length) $('#fth_marathon_type').val(tp);
-        if (city) { var $co = $('#fth_marathon_city option'); $co.filter(function(){ return $(this).val().toLowerCase() === city; }).prop('selected', true); }
-        if (country) { var $co2 = $('#fth_marathon_country option'); $co2.filter(function(){ return $(this).val().toLowerCase() === country; }).prop('selected', true); }
-        var $panel = $('#fth_marathon_url').closest('div[style]');
-        if ($panel.length) $('html,body').animate({scrollTop: $panel.offset().top - 40}, 500);
-    }
-})();
+// Nonce available immediately (PHP rendered at page load)
+var fthMarathonNonce = '<?php echo wp_create_nonce('fth_import_publish'); ?>';
+var fthMarathonStop  = false;
 
-var fthMarathonStop = false;
+// Use window.addEventListener so we never depend on jQuery being loaded first
+window.addEventListener('DOMContentLoaded', function() {
+    var jq = window.jQuery;
+    if (!jq) { return; } // jQuery not available, bail silently
 
-$('#fth_marathon_btn').on('click', function() {
-    var url = $('#fth_marathon_url').val().trim();
-    if (!url) { alert('Please enter a destination URL'); return; }
-    fthMarathonStop = false;
-    var $btn = $(this);
-    var $stop = $('#fth_marathon_stop');
-    var $status = $('#fth_marathon_status');
-    var $counter = $('#fth_marathon_counter');
-    var $log = $('#fth_marathon_log');
-    var $logItems = $('#fth_marathon_log_items');
-    var type = $('#fth_marathon_type').val();
-    var city = $('#fth_marathon_city').val();
-    var country = $('#fth_marathon_country').val();
-    var nonce = '<?php echo wp_create_nonce('fth_import_publish'); ?>';
+    // Auto-prefill from Klook Links Library query params
+    (function() {
+        try {
+            var p = new URLSearchParams(window.location.search);
+            var u = p.get('fthll_prefill_url');
+            if (!u) return;
+            jq('#fth_marathon_url').val(u);
+            var tp = p.get('fthll_prefill_type') || 'activity';
+            if (jq('#fth_marathon_type option[value="'+tp+'"]').length) jq('#fth_marathon_type').val(tp);
+            var city = p.get('fthll_prefill_city') || '';
+            var country = p.get('fthll_prefill_country') || '';
+            if (city)    jq('#fth_marathon_city option').filter(function(){ return jq(this).val().toLowerCase() === city.toLowerCase(); }).prop('selected', true);
+            if (country) jq('#fth_marathon_country option').filter(function(){ return jq(this).val().toLowerCase() === country.toLowerCase(); }).prop('selected', true);
+            var panel = document.getElementById('fth_marathon_url');
+            if (panel) panel.scrollIntoView({behavior:'smooth', block:'center'});
+        } catch(e) {}
+    })();
 
-    $btn.prop('disabled', true).text('Running...');
-    $stop.show();
-    $log.show();
-    $logItems.empty();
-    $status.css('background','rgba(255,255,255,0.15)').text('Discovering URLs...').show();
-    $counter.text('');
+    // Direct DOM event binding (no jQuery .on(), avoids any delegation issues)
+    var startBtn = document.getElementById('fth_marathon_btn');
+    var stopBtn  = document.getElementById('fth_marathon_stop');
+    if (!startBtn) return; // panel not rendered
 
-    var types = type === 'both' ? ['activity', 'hotel'] : [type];
-    var typeIdx = 0;
-    var totalImported = 0;
-    var totalErrors = 0;
-    var BATCH = 5;
+    stopBtn && stopBtn.addEventListener('click', function() {
+        fthMarathonStop = true;
+        stopBtn.style.display = 'none';
+    });
 
-    function marathonLog(msg) {
-        $logItems.prepend('<div style="padding:2px 0;border-bottom:1px solid rgba(255,255,255,0.05);">' + $('<span>').text(msg).html() + '</div>');
-    }
+    startBtn.addEventListener('click', function() {
+        var url = (document.getElementById('fth_marathon_url') || {}).value || '';
+        url = url.trim();
+        if (!url) { alert('Veuillez entrer une URL de destination Klook'); return; }
 
-    function runType(currentType) {
-        if (fthMarathonStop) { finish(); return; }
-        $status.text('🔍 Discovering ' + currentType + ' URLs from ' + url + '...');
-        $.ajax({
-            url: ajaxurl, type: 'POST', timeout: 180000,
-            data: { action: 'fth_discover_import_urls', url: url, type: currentType, city: city, country: country, category: '', limit: 200, nonce: nonce },
-            success: function(res) {
-                if (!res.success || !res.data.urls || !res.data.urls.length) {
-                    marathonLog('⚠️ No ' + currentType + ' URLs found');
-                    nextType(); return;
-                }
-                var urls = res.data.urls;
-                marathonLog('✅ Found ' + urls.length + ' ' + currentType + ' URLs' + (res.data.skipped ? ' (' + res.data.skipped + ' already imported)' : ''));
-                $status.text('Importing ' + urls.length + ' ' + currentType + 's in batches of ' + BATCH + '...');
-                importBatch(currentType, urls, 0, urls.length, 0, 0);
-            },
-            error: function() { marathonLog('❌ Discover failed for ' + currentType); nextType(); }
-        });
-    }
+        fthMarathonStop = false;
+        var type    = (document.getElementById('fth_marathon_type')    || {}).value || 'activity';
+        var city    = (document.getElementById('fth_marathon_city')    || {}).value || '';
+        var country = (document.getElementById('fth_marathon_country') || {}).value || '';
 
-    function importBatch(currentType, urls, idx, total, imported, errors) {
-        if (fthMarathonStop || idx >= total) {
-            marathonLog('──── ' + currentType + 's done: ' + imported + ' imported, ' + errors + ' errors ────');
-            totalImported += imported; totalErrors += errors;
-            nextType(); return;
+        var $status   = jq('#fth_marathon_status');
+        var $counter  = jq('#fth_marathon_counter');
+        var $log      = jq('#fth_marathon_log');
+        var $logItems = jq('#fth_marathon_log_items');
+
+        startBtn.disabled = true;
+        startBtn.textContent = '⏳ Running...';
+        if (stopBtn) stopBtn.style.display = '';
+        $log.show(); $logItems.empty();
+        $status.css('background','rgba(255,255,255,0.15)').text('🔍 Discovering URLs…').show();
+        $counter.text('');
+
+        var types         = (type === 'both') ? ['activity', 'hotel'] : [type];
+        var typeIdx       = 0;
+        var totalImported = 0;
+        var totalErrors   = 0;
+        var BATCH         = 5;
+
+        function mLog(msg) {
+            $logItems.prepend('<div style="padding:2px 0;border-bottom:1px solid rgba(255,255,255,0.06);">' + jq('<span>').text(msg).html() + '</div>');
         }
-        var batch = urls.slice(idx, idx + BATCH);
-        var done = 0;
-        var batchImported = 0;
-        var batchErrors = 0;
-        $counter.text((idx + done) + ' / ' + total + ' ' + currentType + 's');
-        batch.forEach(function(burl) {
-            $.ajax({
-                url: ajaxurl, type: 'POST', timeout: 120000,
-                data: { action: 'fth_import_single_live', url: burl, type: currentType, city: city, country: country, category: '', nonce: nonce },
-                success: function(r) {
-                    if (r.success) { batchImported++; marathonLog('✅ ' + (r.data ? r.data.title : burl)); }
-                    else { batchErrors++; marathonLog('❌ ' + burl + ': ' + (r.data && r.data.message ? r.data.message : 'failed')); }
-                },
-                error: function() { batchErrors++; marathonLog('❌ network error: ' + burl); },
-                complete: function() {
-                    done++;
-                    $counter.text((idx + done) + ' / ' + total + ' ' + currentType + 's');
-                    if (done === batch.length) {
-                        importBatch(currentType, urls, idx + BATCH, total, imported + batchImported, errors + batchErrors);
+
+        function runType(ct) {
+            if (fthMarathonStop) { finish(); return; }
+            $status.text('🔍 Discovering ' + ct + ' URLs from ' + url + '…');
+            jq.ajax({
+                url: ajaxurl, type: 'POST', timeout: 180000,
+                data: { action: 'fth_discover_import_urls', url: url, type: ct, city: city, country: country, category: '', limit: 200, nonce: fthMarathonNonce },
+                success: function(res) {
+                    if (!res || !res.success || !res.data || !res.data.urls || !res.data.urls.length) {
+                        mLog('⚠️ No ' + ct + ' URLs found' + (res && res.data && res.data.message ? ': ' + res.data.message : ''));
+                        nextType(); return;
                     }
+                    var urls = res.data.urls;
+                    mLog('✅ Found ' + urls.length + ' ' + ct + ' URL(s)');
+                    $status.text('Importing ' + urls.length + ' ' + ct + 's in batches of ' + BATCH + '…');
+                    importBatch(ct, urls, 0, urls.length, 0, 0);
+                },
+                error: function(xhr) {
+                    mLog('❌ Discover failed: ' + (xhr.responseText ? xhr.responseText.substring(0,120) : 'network error'));
+                    nextType();
                 }
             });
-        });
-    }
-
-    function nextType() {
-        typeIdx++;
-        if (!fthMarathonStop && typeIdx < types.length) {
-            runType(types[typeIdx]);
-        } else {
-            finish();
         }
-    }
 
-    function finish() {
-        $btn.prop('disabled', false).text('🚀 Start Marathon');
-        $stop.hide();
-        $status.css('background', totalImported > 0 ? 'rgba(76,175,80,0.3)' : 'rgba(255,165,0,0.3)')
-              .text('✅ Marathon complete: ' + totalImported + ' imported, ' + totalErrors + ' errors').show();
-        $counter.text(totalImported + ' total imported');
-    }
+        function importBatch(ct, urls, idx, total, imported, errors) {
+            if (fthMarathonStop || idx >= total) {
+                mLog('──── ' + ct + 's done: ' + imported + ' imported, ' + errors + ' errors ────');
+                totalImported += imported; totalErrors += errors;
+                nextType(); return;
+            }
+            var batch = urls.slice(idx, idx + BATCH);
+            var done = 0, bImp = 0, bErr = 0;
+            $counter.text((idx) + ' / ' + total + ' ' + ct + 's');
+            batch.forEach(function(burl) {
+                jq.ajax({
+                    url: ajaxurl, type: 'POST', timeout: 120000,
+                    data: { action: 'fth_import_single_live', url: burl, type: ct, city: city, country: country, category: '', nonce: fthMarathonNonce },
+                    success: function(r) {
+                        if (r && r.success) { bImp++; mLog('✅ ' + (r.data && r.data.title ? r.data.title : burl)); }
+                        else { bErr++; mLog('❌ ' + burl + ': ' + (r && r.data && r.data.message ? r.data.message : 'failed')); }
+                    },
+                    error: function() { bErr++; mLog('❌ network: ' + burl); },
+                    complete: function() {
+                        done++;
+                        $counter.text((idx + done) + ' / ' + total + ' ' + ct + 's');
+                        if (done === batch.length) importBatch(ct, urls, idx + BATCH, total, imported + bImp, errors + bErr);
+                    }
+                });
+            });
+        }
 
-    runType(types[0]);
-});
+        function nextType() {
+            typeIdx++;
+            if (!fthMarathonStop && typeIdx < types.length) { runType(types[typeIdx]); } else { finish(); }
+        }
 
-$('#fth_marathon_stop').on('click', function() { fthMarathonStop = true; $(this).hide(); });
-}); // end marathon jQuery ready
+        function finish() {
+            startBtn.disabled = false;
+            startBtn.textContent = '🚀 Start Marathon';
+            if (stopBtn) stopBtn.style.display = 'none';
+            $status.css('background', totalImported > 0 ? 'rgba(76,175,80,0.3)' : 'rgba(255,165,0,0.3)')
+                   .text('✅ Done: ' + totalImported + ' imported, ' + totalErrors + ' errors').show();
+            $counter.text(totalImported + ' total imported');
+        }
+
+        runType(types[0]);
+    });
+}); // end DOMContentLoaded
         </script>
         <?php
     }

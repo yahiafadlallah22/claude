@@ -201,23 +201,34 @@ private static function fetch_klook_listing_html($url) {
         }
     }
 
-    // 2. ScraperAPI without render (fast, ~5s, bypasses basic Cloudflare)
+    // Helper: ScraperAPI error detection
+    $is_sa_err = function($b) {
+        if (empty($b)) return true;
+        $low = strtolower(substr($b, 0, 600));
+        return (strpos($low, 'request failed') !== false && strpos($low, 'not be charged') !== false)
+            || strpos($low, 'protected domains') !== false
+            || strpos($low, 'premium=true') !== false;
+    };
+
+    // 2. ScraperAPI render=true + premium (residential IP, bypasses Cloudflare on listing pages)
     $sa_key = self::get_scraperapi_key();
     if (!empty($sa_key)) {
         $sa_url = 'https://api.scraperapi.com?' . http_build_query(array(
             'api_key'      => $sa_key,
             'url'          => $url,
+            'render'       => 'true',
+            'premium'      => 'true',
             'country_code' => 'us',
         ));
-        $sa_r = self::remote_get($sa_url, array('timeout' => 35));
+        $sa_r = self::remote_get($sa_url, array('timeout' => 60));
         if (!is_wp_error($sa_r)) {
             $sa_b = wp_remote_retrieve_body($sa_r);
-            if (!empty($sa_b) && (strpos($sa_b, 'klook.com/activity/') !== false || strpos($sa_b, '__NEXT_DATA__') !== false)) {
+            if (!$is_sa_err($sa_b) && (strpos($sa_b, 'klook.com/activity/') !== false || strpos($sa_b, '__NEXT_DATA__') !== false)) {
                 return $sa_b;
             }
         }
 
-        // 3. ScraperAPI with render=true as last resort (but capped at 60s not 120s)
+        // 3. ScraperAPI without premium as fallback
         $sa_url2 = 'https://api.scraperapi.com?' . http_build_query(array(
             'api_key'      => $sa_key,
             'url'          => $url,
@@ -227,7 +238,7 @@ private static function fetch_klook_listing_html($url) {
         $sa_r2 = self::remote_get($sa_url2, array('timeout' => 60));
         if (!is_wp_error($sa_r2)) {
             $sa_b2 = wp_remote_retrieve_body($sa_r2);
-            if (!empty($sa_b2)) return $sa_b2;
+            if (!$is_sa_err($sa_b2) && !empty($sa_b2)) return $sa_b2;
         }
     }
 
@@ -253,39 +264,53 @@ private static function fetch_klook_html($url) {
     $result    = array('body' => '', 'url' => $url, 'source' => 'none');
     $best_body = '';
 
-    // ── 1. ScraperAPI render=true (FIRST — guaranteed Cloudflare bypass) ─
+    // Helper: detect ScraperAPI / proxy error responses (not real HTML)
+    $is_error_body = function($b) {
+        if (empty($b)) return true;
+        $low = strtolower(substr($b, 0, 600));
+        if (strpos($low, 'request failed') !== false && strpos($low, 'not be charged') !== false) return true;
+        if (strpos($low, '"error"') !== false && strpos($low, 'scraperapi') !== false) return true;
+        if (strpos($low, 'protected domains') !== false) return true;
+        if (strpos($low, 'premium=true') !== false) return true;
+        return false;
+    };
+
+    // ── 1. ScraperAPI render=true + premium (FIRST — guaranteed Cloudflare bypass) ─
     // Klook uses Cloudflare Bot Management which blocks all non-browser cURL.
-    // ScraperAPI with render=true uses real headless Chrome → always gets __NEXT_DATA__.
+    // premium=true routes through residential IPs and real headless Chrome.
     $sa_key = self::get_scraperapi_key();
     if (!empty($sa_key)) {
+        // render=true + premium=true: residential IP + headless Chrome → bypasses Cloudflare on Klook
         $sa_url = 'https://api.scraperapi.com?' . http_build_query(array(
             'api_key'      => $sa_key,
             'url'          => $url,
             'render'       => 'true',
+            'premium'      => 'true',
             'country_code' => 'us',
             'keep_headers' => 'true',
         ));
         $sa_r = self::remote_get($sa_url, array('timeout' => 120));
         if (!is_wp_error($sa_r)) {
             $sa_b = wp_remote_retrieve_body($sa_r);
-            if (!empty($sa_b) && strpos($sa_b, '__NEXT_DATA__') !== false) {
+            if (!$is_error_body($sa_b) && strpos($sa_b, '__NEXT_DATA__') !== false) {
                 return array('body' => $sa_b, 'url' => $url, 'source' => 'scraperapi');
             }
-            if (!empty($sa_b)) $best_body = $sa_b;
+            if (!$is_error_body($sa_b) && !empty($sa_b)) $best_body = $sa_b;
         }
-        // Also try without render (faster, fewer credits, works when Cloudflare is lighter)
+        // render=true without premium (fewer credits, works on lighter Cloudflare)
         $sa_url2 = 'https://api.scraperapi.com?' . http_build_query(array(
             'api_key'      => $sa_key,
             'url'          => $url,
+            'render'       => 'true',
             'country_code' => 'us',
         ));
-        $sa_r2 = self::remote_get($sa_url2, array('timeout' => 60));
+        $sa_r2 = self::remote_get($sa_url2, array('timeout' => 90));
         if (!is_wp_error($sa_r2)) {
             $sa_b2 = wp_remote_retrieve_body($sa_r2);
-            if (!empty($sa_b2) && strpos($sa_b2, '__NEXT_DATA__') !== false) {
-                return array('body' => $sa_b2, 'url' => $url, 'source' => 'scraperapi_fast');
+            if (!$is_error_body($sa_b2) && strpos($sa_b2, '__NEXT_DATA__') !== false) {
+                return array('body' => $sa_b2, 'url' => $url, 'source' => 'scraperapi_render');
             }
-            if (!empty($sa_b2) && empty($best_body)) $best_body = $sa_b2;
+            if (!$is_error_body($sa_b2) && !empty($sa_b2) && empty($best_body)) $best_body = $sa_b2;
         }
     }
 

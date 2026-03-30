@@ -117,7 +117,7 @@ body.tax-travel_country .widget-area,body.tax-travel_country .sidebar,body.tax-t
       <?php foreach ($country_faq_blocks as $block):
         if (preg_match('/^Q:\s*(.+)/u', $block, $mq) && preg_match('/\nA:\s*(.+)/us', $block, $ma)): ?>
         <div class="klco-faq-item">
-          <div class="klco-faq-q" onclick="this.parentElement.classList.toggle('open')">
+          <div class="klco-faq-q">
             <span><?php echo esc_html($mq[1]); ?></span>
             <span class="klco-faq-arrow">▼</span>
           </div>

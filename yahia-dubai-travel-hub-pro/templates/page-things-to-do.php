@@ -250,11 +250,20 @@ body.page .widget-area,body.page .sidebar,body.page .right_sidebar,body.page .pa
       <div class="klp-section-head"><h2>🌍 Explore by city</h2></div>
       <div class="klp-cities">
         <?php foreach (array_slice($sorted_cities, 0, 24) as $city):
-          $hero = get_term_meta($city->term_id, 'fth_hero_image', true);
           $count = FTH_Templates::get_city_activity_count($city->term_id);
+          // Get country flag: find one post in this city and get its country term
+          $city_flag = '';
+          $sample = get_posts(array('post_type'=>array('travel_activity','travel_hotel'),'posts_per_page'=>1,'fields'=>'ids','tax_query'=>array(array('taxonomy'=>'travel_city','terms'=>$city->term_id))));
+          if (!empty($sample)) {
+              $c_terms = wp_get_post_terms($sample[0], 'travel_country', array('fields'=>'names'));
+              if (!empty($c_terms) && !is_wp_error($c_terms)) {
+                  $city_flag = FTH_Templates::get_country_flag($c_terms[0]);
+              }
+          }
+          if (empty($city_flag)) $city_flag = '🌍';
         ?>
         <a class="klp-city-card" href="<?php echo esc_url(get_term_link($city)); ?>">
-          <div class="flag"><?php echo ($city->name === 'Dubai' || $city->name === 'Dubaï') ? '🇦🇪' : '📍'; ?></div>
+          <div class="flag"><?php echo $city_flag; ?></div>
           <div><?php echo esc_html($city->name); ?></div>
           <?php if ($count): ?><div style="font-size:11px;color:#999;margin-top:4px;font-weight:500"><?php echo $count; ?> activit<?php echo $count > 1 ? 'ies' : 'y'; ?></div><?php endif; ?>
         </a>
