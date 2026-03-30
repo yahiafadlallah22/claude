@@ -272,7 +272,13 @@ class FTH_Admin {
 
         <!-- Hub Pages Overview -->
         <div style="background:#fff;border:1px solid #e5e7eb;border-radius:12px;padding:20px;box-shadow:0 1px 3px rgba(0,0,0,.06);">
-            <h2 style="margin:0 0 16px;font-size:15px;font-weight:800;display:flex;align-items:center;gap:8px;">🌐 Hub Pages <span style="font-size:11px;font-weight:400;color:#888;">All auto-generated public pages</span></h2>
+            <h2 style="margin:0 0 12px;font-size:15px;font-weight:800;display:flex;align-items:center;gap:8px;">🌐 Hub Pages <span style="font-size:11px;font-weight:400;color:#888;">All auto-generated public pages</span></h2>
+
+            <!-- Auto-created pages regenerate bar -->
+            <div style="background:#f0f7ff;border:1px solid #bfdbfe;border-radius:8px;padding:10px 12px;margin-bottom:14px;display:flex;align-items:center;justify-content:space-between;gap:10px;flex-wrap:wrap;">
+                <span style="font-size:12px;color:#1e40af;font-weight:600;">Pages WordPress créées automatiquement (Things To Do, Hotels, Passes…)</span>
+                <a href="<?php echo esc_url(wp_nonce_url(admin_url('admin-post.php?action=fth_regenerate_pages'), 'fth_regenerate_pages')); ?>" class="button button-primary" style="font-size:12px;padding:4px 14px;height:auto;">🔄 Régénérer les pages</a>
+            </div>
 
             <!-- Static pages -->
             <div style="margin-bottom:14px;">
@@ -648,7 +654,10 @@ class FTH_Admin {
         $do_hotels     = !empty($_POST['hotels']);
         $do_media      = !empty($_POST['media']);
 
-        if (!$do_activities && !$do_hotels) {
+        $do_destinations = !empty($_POST['destinations']);
+        $do_terms        = !empty($_POST['terms']);
+
+        if (!$do_activities && !$do_hotels && !$do_destinations && !$do_terms) {
             wp_send_json_error(array('message' => 'Nothing selected.'));
         }
 
@@ -684,11 +693,37 @@ class FTH_Admin {
             $deleted++;
         }
 
+        // Nuclear option: also delete destinations and all taxonomy terms
+        $terms_deleted = 0;
+        if ($do_destinations) {
+            $dest_posts = get_posts(array('post_type' => 'travel_destination', 'post_status' => 'any', 'posts_per_page' => -1, 'fields' => 'ids'));
+            foreach ((array) $dest_posts as $dp_id) {
+                if ($do_media) {
+                    $t_id = (int) get_post_thumbnail_id($dp_id);
+                    if ($t_id) { wp_delete_attachment($t_id, true); $media_deleted++; }
+                }
+                wp_delete_post($dp_id, true);
+                $deleted++;
+            }
+        }
+        if ($do_terms) {
+            foreach (array('travel_city', 'travel_country', 'travel_category') as $tax) {
+                $all_terms = get_terms(array('taxonomy' => $tax, 'hide_empty' => false, 'fields' => 'ids'));
+                if (!is_wp_error($all_terms)) {
+                    foreach ((array) $all_terms as $tid) {
+                        wp_delete_term((int) $tid, $tax);
+                        $terms_deleted++;
+                    }
+                }
+            }
+        }
+
         $msg = 'Deleted ' . $deleted . ' post(s)';
         if ($do_media) $msg .= ' and ' . $media_deleted . ' media file(s)';
+        if ($do_terms) $msg .= ' and ' . $terms_deleted . ' taxonomy term(s)';
         $msg .= '.';
 
-        wp_send_json_success(array('message' => $msg, 'deleted' => $deleted, 'media_deleted' => $media_deleted));
+        wp_send_json_success(array('message' => $msg, 'deleted' => $deleted, 'media_deleted' => $media_deleted, 'terms_deleted' => $terms_deleted));
     }
 
     public static function handle_delete_imported_media() {
@@ -1060,6 +1095,12 @@ class FTH_Admin {
                         </label>
                         <label style="display:flex;align-items:center;gap:8px;cursor:pointer;">
                             <input type="checkbox" id="fth_delete_hotels" value="1" checked> Delete all hotels
+                        </label>
+                        <label style="display:flex;align-items:center;gap:8px;cursor:pointer;">
+                            <input type="checkbox" id="fth_delete_destinations" value="1"> Delete destinations
+                        </label>
+                        <label style="display:flex;align-items:center;gap:8px;cursor:pointer;">
+                            <input type="checkbox" id="fth_delete_terms" value="1"> Delete all cities/countries/categories
                         </label>
                         <label style="display:flex;align-items:center;gap:8px;cursor:pointer;">
                             <input type="checkbox" id="fth_delete_media" value="1"> Also delete imported images
@@ -1639,19 +1680,23 @@ class FTH_Admin {
 
         // ── Delete All Content ────────────────────────────────────────────────────
         $('#fth_delete_all_btn').on('click', function() {
-            var doActivities = $('#fth_delete_activities').is(':checked');
-            var doHotels     = $('#fth_delete_hotels').is(':checked');
-            var doMedia      = $('#fth_delete_media').is(':checked');
+            var doActivities   = $('#fth_delete_activities').is(':checked');
+            var doHotels       = $('#fth_delete_hotels').is(':checked');
+            var doDestinations = $('#fth_delete_destinations').is(':checked');
+            var doTerms        = $('#fth_delete_terms').is(':checked');
+            var doMedia        = $('#fth_delete_media').is(':checked');
             var $btn    = $(this);
             var $status = $('#fth_delete_all_status');
 
-            if (!doActivities && !doHotels) {
+            if (!doActivities && !doHotels && !doDestinations && !doTerms) {
                 $status.css('background','rgba(244,67,54,0.3)').text('Select at least one content type to delete.').show();
                 return;
             }
             var types = [];
-            if (doActivities) types.push('activities');
-            if (doHotels)     types.push('hotels');
+            if (doActivities)   types.push('activities');
+            if (doHotels)       types.push('hotels');
+            if (doDestinations) types.push('destinations');
+            if (doTerms)        types.push('taxonomy terms');
             var label = types.join(' and ');
             if (!confirm('⚠️ This will permanently delete all ' + label + (doMedia ? ' and their images' : '') + '. This cannot be undone.\n\nAre you sure?')) return;
 
@@ -1663,10 +1708,12 @@ class FTH_Admin {
                 type: 'POST',
                 timeout: 300000,
                 data: {
-                    action:      'fth_delete_all_content',
-                    activities:  doActivities ? 1 : 0,
-                    hotels:      doHotels     ? 1 : 0,
-                    media:       doMedia      ? 1 : 0,
+                    action:        'fth_delete_all_content',
+                    activities:    doActivities   ? 1 : 0,
+                    hotels:        doHotels       ? 1 : 0,
+                    destinations:  doDestinations ? 1 : 0,
+                    terms:         doTerms        ? 1 : 0,
+                    media:         doMedia        ? 1 : 0,
                     nonce: '<?php echo wp_create_nonce('fth_import_publish'); ?>'
                 },
                 success: function(res) {

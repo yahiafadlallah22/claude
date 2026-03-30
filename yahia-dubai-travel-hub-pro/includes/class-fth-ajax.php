@@ -2699,12 +2699,34 @@ public static function import_bulk_city() {
         if ($htl_nd_raw !== '') {
             $next = json_decode(html_entity_decode(trim($htl_nd_raw), ENT_QUOTES, 'UTF-8'), true);
             if (is_array($next)) {
-                $props = isset($next['props']['pageProps']) ? $next['props']['pageProps'] : $next;
-                $title = self::normalize_front_title(self::array_find_first($props, array('seoTitle','hotelName','name','title','hotel_title')), $url);
+                $htl_page_props_raw = isset($next['props']['pageProps']) ? $next['props']['pageProps'] : $next;
+
+                // Klook (2024-2025) uses React Query: real data lives in dehydratedState.queries[n].state.data
+                $props = $htl_page_props_raw;
+                if (isset($htl_page_props_raw['dehydratedState']['queries']) && is_array($htl_page_props_raw['dehydratedState']['queries'])) {
+                    $htl_act_qs   = array();
+                    $htl_other_qs = array();
+                    foreach ($htl_page_props_raw['dehydratedState']['queries'] as $dq) {
+                        if (empty($dq['state']['data'])) continue;
+                        $qhash = strtolower(isset($dq['queryHash']) ? $dq['queryHash'] : '');
+                        if (strpos($qhash, 'hotel') !== false || strpos($qhash, 'detail') !== false
+                            || strpos($qhash, 'property') !== false || strpos($qhash, 'room') !== false) {
+                            $htl_act_qs[] = $dq['state']['data'];
+                        } else {
+                            $htl_other_qs[] = $dq['state']['data'];
+                        }
+                    }
+                    $htl_all_qs = array_merge($htl_act_qs, $htl_other_qs);
+                    if (!empty($htl_all_qs)) {
+                        $props = array_merge(array('_klook_queries' => $htl_all_qs), $htl_page_props_raw);
+                    }
+                }
+
+                $title = self::normalize_front_title(self::array_find_first($props, array('hotel_name','property_name','seoTitle','hotelName','name','title','hotel_title')), $url);
                 if ($title !== '') {
                     $data['title'] = preg_replace('/\s*[-|–—]\s*Klook.*$/iu', '', $title);
                 }
-                $desc = self::array_find_first($props, array('description','seoDescription','summary','about','hotelDescription','hotelIntro'));
+                $desc = self::array_find_first($props, array('hotel_intro','property_intro','hotelIntro','hotelDescription','description','seoDescription','summary','about'));
                 if (!empty($desc)) {
                     $desc_text = self::normalize_text_block($desc);
                     if ($desc_text !== '') {
@@ -3237,17 +3259,41 @@ foreach (array('id="__NEXT_DATA__"', "id='__NEXT_DATA__'", 'id="__NEXT_DATA__" '
 if ($next_data_raw !== '') {
     $next_json = json_decode(html_entity_decode(trim($next_data_raw), ENT_QUOTES, 'UTF-8'), true);
     if (is_array($next_json)) {
-        $next_props = isset($next_json['props']['pageProps']) ? $next_json['props']['pageProps'] : $next_json;
+        $page_props_raw = isset($next_json['props']['pageProps']) ? $next_json['props']['pageProps'] : $next_json;
+
+        // Klook (2024-2025) uses React Query: real data lives in dehydratedState.queries[n].state.data
+        // Extract all query payloads and inject them at the top of the search tree so array_find_first
+        // reaches them before the sparse pageProps shell.
+        $next_props = $page_props_raw;
+        if (isset($page_props_raw['dehydratedState']['queries']) && is_array($page_props_raw['dehydratedState']['queries'])) {
+            $act_qs   = array();
+            $other_qs = array();
+            foreach ($page_props_raw['dehydratedState']['queries'] as $dq) {
+                if (empty($dq['state']['data'])) continue;
+                $qhash = strtolower(isset($dq['queryHash']) ? $dq['queryHash'] : '');
+                if (strpos($qhash, 'activity') !== false || strpos($qhash, 'detail') !== false
+                    || strpos($qhash, 'product') !== false || strpos($qhash, 'package') !== false) {
+                    $act_qs[] = $dq['state']['data'];
+                } else {
+                    $other_qs[] = $dq['state']['data'];
+                }
+            }
+            $all_qs = array_merge($act_qs, $other_qs);
+            if (!empty($all_qs)) {
+                // Prepend so DFS hits activity data before the sparse pageProps shell
+                $next_props = array_merge(array('_klook_queries' => $all_qs), $page_props_raw);
+            }
+        }
 
         if (empty($data['title'])) {
-            $title_candidate = self::array_find_first($next_props, array('seoTitle', 'title', 'name', 'activityName', 'productName'));
+            $title_candidate = self::array_find_first($next_props, array('seoTitle','activity_name','activityName','productName','name','title'));
             $title_candidate = self::normalize_text_block($title_candidate);
             if ($title_candidate !== '') {
                 $data['title'] = $title_candidate;
             }
         }
 
-        $desc_candidate = self::array_find_first($next_props, array('description', 'seoDescription', 'introduction', 'details', 'content', 'activityIntro', 'packageDescription'));
+        $desc_candidate = self::array_find_first($next_props, array('activity_intro','activityIntro','intro','introduction','description','seoDescription','details','content','packageDescription'));
         if ((empty($data['description']) || strlen(wp_strip_all_tags($data['description'])) < 120) && !empty($desc_candidate)) {
             $desc_text = self::normalize_text_block($desc_candidate);
             if ($desc_text !== '') {
@@ -3257,35 +3303,35 @@ if ($next_data_raw !== '') {
         }
 
         if (empty($data['highlights'])) {
-            $highlights_text = self::bullet_lines(self::array_find_first($next_props, array('highlights', 'activityHighlights', 'keyHighlights', 'highlightsText')), 10);
+            $highlights_text = self::bullet_lines(self::array_find_first($next_props, array('highlight_list','highlights','activityHighlights','keyHighlights','highlightsText')), 10);
             if ($highlights_text !== '') {
                 $data['highlights'] = $highlights_text;
             }
         }
 
         if (empty($data['inclusions'])) {
-            $inc_text = self::bullet_lines(self::array_find_first($next_props, array('inclusions', 'included', 'packageInclusions', 'whatIsIncluded')), 12);
+            $inc_text = self::bullet_lines(self::array_find_first($next_props, array('inclusion_list','inclusions','included','packageInclusions','whatIsIncluded','what_is_included')), 12);
             if ($inc_text !== '') {
                 $data['inclusions'] = $inc_text;
             }
         }
 
         if (empty($data['exclusions'])) {
-            $exc_text = self::bullet_lines(self::array_find_first($next_props, array('exclusions', 'excluded', 'whatIsExcluded')), 12);
+            $exc_text = self::bullet_lines(self::array_find_first($next_props, array('exclusion_list','exclusions','excluded','whatIsExcluded','what_is_excluded')), 12);
             if ($exc_text !== '') {
                 $data['exclusions'] = $exc_text;
             }
         }
 
         if (empty($data['meeting_point'])) {
-            $meeting_text = self::normalize_text_block(self::array_find_first($next_props, array('meetingPoint', 'meetingLocation', 'address', 'locationName')));
+            $meeting_text = self::normalize_text_block(self::array_find_first($next_props, array('meeting_point','meetingPoint','meetingLocation','address','locationName','location_name')));
             if ($meeting_text !== '') {
                 $data['meeting_point'] = $meeting_text;
             }
         }
 
         if (empty($data['itinerary'])) {
-            $it_keys = array('itinerary','itineraries','schedule','dayByDay','tourItinerary','timeline','routeInfo','activitySchedule','stops','waypoints','tourStops');
+            $it_keys = array('itinerary','itineraries','route_info','tour_route','tour_stop','stops','schedule','day_by_day','dayByDay','tourItinerary','timeline','routeInfo','activitySchedule','waypoints','tourStops');
             $it_raw  = self::array_find_first($next_props, $it_keys);
             if (!empty($it_raw)) {
                 $it_lines = array();
@@ -3336,7 +3382,7 @@ if ($next_data_raw !== '') {
         // ── Price extraction (v1.7 improved) ──────────────────────────
         if (empty($data['price'])) {
             $price_candidate = self::array_find_first($next_props, array(
-                'sellPrice','fromPrice','minSellingPrice','salePrice','discountPrice','lowestPrice','price'
+                'min_price','from_price','sell_price','sellPrice','fromPrice','minSellingPrice','salePrice','discountPrice','lowestPrice','price'
             ));
             // If we got a price-object, drill into it and extract currency at the same time
             if (is_array($price_candidate)) {
@@ -3358,7 +3404,7 @@ if ($next_data_raw !== '') {
         }
 
         if (empty($data['original_price'])) {
-            $orig_candidate = self::array_find_first($next_props, array('originalPrice','marketPrice','strikePrice','retailPrice','crossedPrice','listPrice','originalListPrice'));
+            $orig_candidate = self::array_find_first($next_props, array('original_price','market_price','originalPrice','marketPrice','strikePrice','retailPrice','crossedPrice','listPrice','originalListPrice'));
             if (is_array($orig_candidate)) {
                 $orig_candidate = self::array_find_first($orig_candidate, array('amount','value','formatValue','displayPrice'));
             }
@@ -3396,13 +3442,13 @@ if ($next_data_raw !== '') {
 
         // Extract FAQ if available
         if (empty($data['faq'])) {
-            $faq_candidate = self::array_find_first($next_props, array('faq','faqs','faqList','questionAnswer','qAndA'));
+            $faq_candidate = self::array_find_first($next_props, array('faq_list','faq','faqs','faqList','question_answer_list','questionAnswer','qAndA'));
             if (!empty($faq_candidate)) {
                 $faq_lines = array();
                 if (is_array($faq_candidate)) {
                     foreach (array_slice((array) $faq_candidate, 0, 6) as $item) {
-                        $q = self::normalize_text_block(is_array($item) ? self::array_find_first($item, array('question','title','q')) : '');
-                        $a = self::normalize_text_block(is_array($item) ? self::array_find_first($item, array('answer','content','a')) : '');
+                        $q = self::normalize_text_block(is_array($item) ? self::array_find_first($item, array('question','question_content','title','q')) : '');
+                        $a = self::normalize_text_block(is_array($item) ? self::array_find_first($item, array('answer','answer_content','content','a')) : '');
                         if ($q && $a) $faq_lines[] = 'Q: ' . $q . "\nA: " . $a;
                     }
                 }
@@ -3411,7 +3457,7 @@ if ($next_data_raw !== '') {
         }
 
         if (empty($data['rating'])) {
-            $rating_candidate = self::array_find_first($next_props, array('rating', 'ratingValue', 'score', 'star'));
+            $rating_candidate = self::array_find_first($next_props, array('score','rating','ratingValue','star','avg_score'));
             if (is_string($rating_candidate) || is_numeric($rating_candidate)) {
                 $rating_val = (float) preg_replace('/[^\d\.]/', '', (string) $rating_candidate);
                 if ($rating_val > 0 && $rating_val <= 5) {
@@ -3421,7 +3467,7 @@ if ($next_data_raw !== '') {
         }
 
         if (empty($data['review_count'])) {
-            $reviews_candidate = self::array_find_first($next_props, array('reviewCount', 'reviews', 'commentCount', 'participantCount', 'totalReviews'));
+            $reviews_candidate = self::array_find_first($next_props, array('comment_total','comment_count','reviewCount','reviews','commentCount','participantCount','totalReviews','review_count'));
             if (is_string($reviews_candidate) || is_numeric($reviews_candidate)) {
                 $reviews_val = (int) preg_replace('/[^\d]/', '', (string) $reviews_candidate);
                 if ($reviews_val > 0) {
@@ -3431,7 +3477,7 @@ if ($next_data_raw !== '') {
         }
 
         if (empty($data['duration'])) {
-            $duration_text = self::normalize_text_block(self::array_find_first($next_props, array('duration', 'activityDuration', 'packageDuration', 'serviceDuration')));
+            $duration_text = self::normalize_text_block(self::array_find_first($next_props, array('open_time','duration_str','duration','activityDuration','packageDuration','serviceDuration','service_duration')));
             if ($duration_text !== '') {
                 $data['duration'] = $duration_text;
             }
@@ -3440,11 +3486,13 @@ if ($next_data_raw !== '') {
         // ── Image extraction — cover all Klook JSON structures ───────────
         // Klook uses many different key names across their various page types and API versions.
         $img_scalar_keys = array(
+            'cover_img_url','img_url','cover_image_url',
             'coverImageUrl','imageUrl','image','heroImageUrl','shareImage',
             'imgUrl','coverImg','thumbnailUrl','thumbnail','cover','imgSrc',
             'url','src','originalUrl','large','medium','original',
         );
         $img_array_keys = array(
+            'cover_img_list','img_list','image_list','photo_list',
             'coverImages','images','gallery','photos','imageList',
             'activityImages','packageImages','coverImageList',
         );
