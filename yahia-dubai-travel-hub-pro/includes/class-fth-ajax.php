@@ -410,27 +410,72 @@ private static function fetch_klook_html($url) {
         return null;
     };
 
+    // Helper: perform a single Klook JSON API call and return the decoded array, or null on failure.
+    // $fetch_url can be the direct endpoint OR a ScraperAPI-wrapped URL.
+    $try_klook_api_call = function($fetch_url, $timeout = 45) {
+        $api_r = self::remote_get($fetch_url, array('timeout' => $timeout, 'headers' => array(
+            'Accept'           => 'application/json, text/plain, */*',
+            'Accept-Language'  => 'en-US,en;q=0.9',
+            'Origin'           => 'https://www.klook.com',
+            'Referer'          => 'https://www.klook.com/',
+            'X-Requested-With' => 'XMLHttpRequest',
+        )));
+        if (is_wp_error($api_r)) return null;
+        $api_body = wp_remote_retrieve_body($api_r);
+        if (empty($api_body)) return null;
+        // Reject if response is HTML (DataDome challenge or error page)
+        $trimmed = ltrim($api_body);
+        if (strncasecmp($trimmed, '<', 1) === 0) return null; // HTML, not JSON
+        $api_data = json_decode($api_body, true);
+        if (!is_array($api_data)) return null;
+        return $api_data;
+    };
+
+    // Helper: build ScraperAPI URL for a given endpoint (no render — just proxy, cheap)
+    $sa_proxy_url = function($endpoint) use ($sa_key) {
+        if (empty($sa_key)) return null;
+        return 'https://api.scraperapi.com?' . http_build_query(array(
+            'api_key'      => $sa_key,
+            'url'          => $endpoint,
+            'country_code' => 'us',
+        ));
+    };
+
     if ($act_id) {
         $api_endpoints = array(
             'https://www.klook.com/v1/activityDetail/getActivityInfo/?activity_id=' . $act_id . '&currency=USD&language=en-US',
             'https://www.klook.com/api/seasoning/v2/activity/' . $act_id . '/?currency=USD&language=en-US',
             'https://www.klook.com/api/merapi/v2/activity/detail/?activity_id=' . $act_id . '&currency=USD&language=en-US',
         );
-        foreach ($api_endpoints as $api_ep) {
-            $api_r = self::remote_get($api_ep, array('timeout' => 30, 'headers' => array(
-                'Accept'          => 'application/json',
-                'Accept-Language' => 'en-US,en;q=0.9',
-                'Origin'          => 'https://www.klook.com',
-                'Referer'         => 'https://www.klook.com/',
-                'X-Requested-With' => 'XMLHttpRequest',
-            )));
-            if (is_wp_error($api_r)) continue;
-            $api_body = wp_remote_retrieve_body($api_r);
-            if (empty($api_body)) continue;
-            $api_data = json_decode($api_body, true);
-            $inner = $extract_api_payload($api_data);
-            if (!$inner) continue;
 
+        $inner = null;
+        $api_source = 'klook_api';
+
+        // 2a. Direct API calls (no ScraperAPI, no rendering — fastest)
+        foreach ($api_endpoints as $api_ep) {
+            $api_data = $try_klook_api_call($api_ep, 30);
+            if (!$api_data) continue;
+            $inner = $extract_api_payload($api_data);
+            if ($inner && count($inner) >= 3) { $api_source = 'klook_api'; break; }
+            $inner = null;
+        }
+
+        // 2b. Via ScraperAPI proxy (no render — routes through residential IPs, bypasses IP blocks)
+        if (!$inner && $sa_key) {
+            foreach ($api_endpoints as $api_ep) {
+                $proxy = $sa_proxy_url($api_ep);
+                if (!$proxy) continue;
+                $api_data = $try_klook_api_call($proxy, 60);
+                if (!$api_data) continue;
+                // ScraperAPI may return its own error JSON
+                if (isset($api_data['statusCode']) && $api_data['statusCode'] >= 400) continue;
+                $inner = $extract_api_payload($api_data);
+                if ($inner && count($inner) >= 3) { $api_source = 'klook_api_scraperapi'; break; }
+                $inner = null;
+            }
+        }
+
+        if ($inner) {
             // Put data in MULTIPLE places so the parser always finds it:
             // 1. In dehydratedState.queries (primary path for modern Klook pages)
             // 2. Directly in pageProps (fallback if dehydratedState parsing misses it)
@@ -451,28 +496,41 @@ private static function fetch_klook_html($url) {
                 . '<script id="__NEXT_DATA__" type="application/json">'
                 . wp_json_encode($synth_data)
                 . '</script></body></html>';
-            return array('body' => $synth_html, 'url' => $url, 'source' => 'klook_api');
+            return array('body' => $synth_html, 'url' => $url, 'source' => $api_source);
         }
     } elseif ($hotel_id) {
         $hotel_endpoints = array(
             'https://www.klook.com/api/merapi/v2/hotel/detail/?hotel_id=' . $hotel_id . '&currency=USD&language=en-US',
             'https://www.klook.com/v1/hotelDetail/getHotelInfo/?hotel_id=' . $hotel_id . '&currency=USD&language=en-US',
         );
-        foreach ($hotel_endpoints as $api_ep) {
-            $api_r = self::remote_get($api_ep, array('timeout' => 30, 'headers' => array(
-                'Accept'          => 'application/json',
-                'Accept-Language' => 'en-US,en;q=0.9',
-                'Origin'          => 'https://www.klook.com',
-                'Referer'         => 'https://www.klook.com/',
-                'X-Requested-With' => 'XMLHttpRequest',
-            )));
-            if (is_wp_error($api_r)) continue;
-            $api_body = wp_remote_retrieve_body($api_r);
-            if (empty($api_body)) continue;
-            $api_data = json_decode($api_body, true);
-            $inner = $extract_api_payload($api_data);
-            if (!$inner) continue;
 
+        $inner = null;
+        $api_source = 'klook_api_hotel';
+
+        // 2a. Direct API calls
+        foreach ($hotel_endpoints as $api_ep) {
+            $api_data = $try_klook_api_call($api_ep, 30);
+            if (!$api_data) continue;
+            $inner = $extract_api_payload($api_data);
+            if ($inner && count($inner) >= 3) { $api_source = 'klook_api_hotel'; break; }
+            $inner = null;
+        }
+
+        // 2b. Via ScraperAPI proxy
+        if (!$inner && $sa_key) {
+            foreach ($hotel_endpoints as $api_ep) {
+                $proxy = $sa_proxy_url($api_ep);
+                if (!$proxy) continue;
+                $api_data = $try_klook_api_call($proxy, 60);
+                if (!$api_data) continue;
+                if (isset($api_data['statusCode']) && $api_data['statusCode'] >= 400) continue;
+                $inner = $extract_api_payload($api_data);
+                if ($inner && count($inner) >= 3) { $api_source = 'klook_api_hotel_scraperapi'; break; }
+                $inner = null;
+            }
+        }
+
+        if ($inner) {
             $page_props = array_merge(
                 $inner,
                 array(
@@ -490,7 +548,7 @@ private static function fetch_klook_html($url) {
                 . '<script id="__NEXT_DATA__" type="application/json">'
                 . wp_json_encode($synth_data)
                 . '</script></body></html>';
-            return array('body' => $synth_html, 'url' => $url, 'source' => 'klook_api_hotel');
+            return array('body' => $synth_html, 'url' => $url, 'source' => $api_source);
         }
     }
 
@@ -1600,6 +1658,7 @@ public static function discover_import_urls() {
     if (!current_user_can('edit_posts')) {
         self::send_json_error_clean('Unauthorized');
     }
+    try {
     $type         = isset($_POST['type']) ? sanitize_text_field($_POST['type']) : 'activity';
     $url          = isset($_POST['url']) ? esc_url_raw($_POST['url']) : '';
     $city         = isset($_POST['city']) ? intval($_POST['city']) : 0;
@@ -1728,6 +1787,9 @@ public static function discover_import_urls() {
         'skipped'      => $already_count,
         'force_update' => $force_update,
     ));
+    } catch (\Throwable $e) {
+        self::send_json_error_clean('Discovery error: ' . $e->getMessage());
+    }
 }
 
 /**
@@ -1808,15 +1870,16 @@ public static function import_single_live() {
         $discount = round((1 - (float)$price / (float)$orig) * 100) . '%';
     }
     self::send_json_success_clean(array(
-        'post_id'   => $post_id,
-        'title'     => $post ? $post->post_title : '',
-        'edit_url'  => get_edit_post_link($post_id, 'raw'),
-        'view_url'  => get_permalink($post_id),
-        'thumb'     => $thumb,
-        'price'     => $price,
-        'orig'      => $orig,
-        'currency'  => $currency,
-        'discount'  => $discount,
+        'post_id'      => $post_id,
+        'title'        => $post ? $post->post_title : '',
+        'edit_url'     => get_edit_post_link($post_id, 'raw'),
+        'view_url'     => get_permalink($post_id),
+        'thumb'        => $thumb,
+        'price'        => $price,
+        'orig'         => $orig,
+        'currency'     => $currency,
+        'discount'     => $discount,
+        'fetch_source' => get_post_meta($post_id, '_fth_fetch_source', true),
     ));
 }
 
@@ -2368,9 +2431,10 @@ public static function import_bulk_city() {
         }
 
         // Fetch with multi-strategy fallback: direct → no-locale → Google Cache → Wayback Machine
-        $fetch = self::fetch_klook_html($url);
-        $body  = $fetch['body'];
-        $url   = $fetch['url'];
+        $fetch        = self::fetch_klook_html($url);
+        $body         = $fetch['body'];
+        $url          = $fetch['url'];
+        $fetch_source = isset($fetch['source']) ? $fetch['source'] : 'unknown';
 
         if (empty($body)) {
             return array('success' => false, 'message' => 'Failed to fetch activity page (all strategies failed): ' . $url);
@@ -2472,6 +2536,7 @@ public static function import_bulk_city() {
         if (!empty($data['image']))          update_post_meta($post_id, '_fth_external_image', $data['image']);
         if (!empty($data['affiliate_link'])) update_post_meta($post_id, '_fth_affiliate_link', $data['affiliate_link']);
         if (!empty($data['activity_id']))    update_post_meta($post_id, '_fth_klook_activity_id', $data['activity_id']);
+        update_post_meta($post_id, '_fth_fetch_source', $fetch_source);
         
         // Import featured image and save gallery
         self::import_post_images($post_id, !empty($data['image']) ? $data['image'] : '', !empty($data['images']) && is_array($data['images']) ? $data['images'] : array());
@@ -2931,8 +2996,9 @@ public static function import_bulk_city() {
      */
     private static function import_hotel($url, $params, $original_deeplink = '') {
         // Fetch with multi-strategy fallback: direct → no-locale → Google Cache → Wayback Machine
-        $fetch = self::fetch_klook_html($url);
-        $body  = $fetch['body'];
+        $fetch        = self::fetch_klook_html($url);
+        $body         = $fetch['body'];
+        $fetch_source = isset($fetch['source']) ? $fetch['source'] : 'unknown';
         if (empty($body)) {
             return array('success'=>false,'message'=>'Failed to fetch hotel page (all strategies failed): ' . $url);
         }
@@ -2996,6 +3062,7 @@ public static function import_bulk_city() {
         }
         // Save hotel_id with consistent key used by duplicate detection
         if (!empty($data['hotel_id'])) update_post_meta($post_id, '_fth_klook_hotel_id', $data['hotel_id']);
+        update_post_meta($post_id, '_fth_fetch_source', $fetch_source);
         // Save hotel details fields
         if (!empty($data['highlights'])) update_post_meta($post_id, '_fth_highlights', $data['highlights']);
         if (!empty($data['inclusions'])) update_post_meta($post_id, '_fth_inclusions', $data['inclusions']);
