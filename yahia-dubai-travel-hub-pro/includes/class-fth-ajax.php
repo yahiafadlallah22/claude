@@ -281,23 +281,145 @@ private static function fetch_klook_html($url) {
     $result    = array('body' => '', 'url' => $url, 'source' => 'none');
     $best_body = '';
 
-    // Helper: detect ScraperAPI / proxy error responses (not real HTML)
+    // Helper: detect ScraperAPI / proxy errors AND DataDome / bot challenge pages
     $is_error_body = function($b) {
         if (empty($b)) return true;
-        $low = strtolower(substr($b, 0, 600));
-        if (strpos($low, 'request failed') !== false && strpos($low, 'not be charged') !== false) return true;
-        if (strpos($low, '"error"') !== false && strpos($low, 'scraperapi') !== false) return true;
-        if (strpos($low, 'protected domains') !== false) return true;
-        if (strpos($low, 'premium=true') !== false) return true;
+        // ScraperAPI-specific errors
+        $low600 = strtolower(substr($b, 0, 600));
+        if (strpos($low600, 'request failed') !== false && strpos($low600, 'not be charged') !== false) return true;
+        if (strpos($low600, '"error"') !== false && strpos($low600, 'scraperapi') !== false) return true;
+        if (strpos($low600, 'protected domains') !== false) return true;
+        if (strpos($low600, 'premium=true') !== false) return true;
+        // DataDome / Cloudflare bot challenge — tiny page with no __NEXT_DATA__
+        if (strlen($b) < 2000 && strpos($b, '__NEXT_DATA__') === false) {
+            $low = strtolower($b);
+            if (strpos($low, 'captcha-delivery.com') !== false) return true;
+            if (strpos($low, 'geo.captcha') !== false) return true;
+            if (strpos($low, 'datadome') !== false) return true;
+            if (strpos($low, "dd={'") !== false || strpos($low, 'dd={') !== false) return true;
+            if (strpos($low, 'please enable js') !== false) return true;
+            if (strpos($low, 'enable javascript') !== false) return true;
+            if (strpos($low, 'please wait') !== false && strpos($low, 'klook') !== false) return true;
+            if (strpos($low, 'checking your browser') !== false) return true;
+            if (strpos($low, 'just a moment') !== false) return true;
+            if (strpos($low, 'ray id') !== false && strpos($low, 'cloudflare') !== false) return true;
+        }
         return false;
     };
 
-    // ── 1. ScraperAPI render=true + premium (FIRST — guaranteed Cloudflare bypass) ─
-    // Klook uses Cloudflare Bot Management which blocks all non-browser cURL.
-    // premium=true routes through residential IPs and real headless Chrome.
     $sa_key = self::get_scraperapi_key();
+
+    // ── 1. ScraperAPI ultra_premium (DataDome-specific bypass) ───────────────
+    // ultra_premium=true is the flag specifically for DataDome-protected sites.
+    // Different from premium=true (Cloudflare) — Klook uses DataDome.
     if (!empty($sa_key)) {
-        // render=true + premium=true: residential IP + headless Chrome → bypasses Cloudflare on Klook
+        $sa_url_up = 'https://api.scraperapi.com?' . http_build_query(array(
+            'api_key'       => $sa_key,
+            'url'           => $url,
+            'ultra_premium' => 'true',
+            'render'        => 'true',
+            'country_code'  => 'us',
+            'keep_headers'  => 'true',
+        ));
+        $sa_r_up = self::remote_get($sa_url_up, array('timeout' => 180));
+        if (!is_wp_error($sa_r_up)) {
+            $sa_b_up = wp_remote_retrieve_body($sa_r_up);
+            if (!$is_error_body($sa_b_up) && strpos($sa_b_up, '__NEXT_DATA__') !== false) {
+                return array('body' => $sa_b_up, 'url' => $url, 'source' => 'scraperapi_ultra');
+            }
+            if (!$is_error_body($sa_b_up) && !empty($sa_b_up)) $best_body = $sa_b_up;
+        }
+    }
+
+    // ── 2. Klook JSON API (bypasses DataDome entirely — API ≠ browser) ───────
+    // DataDome targets browser-type traffic. Klook's own mobile/app API endpoints
+    // return JSON directly and are not behind the DataDome challenge.
+    // We wrap the JSON response as synthetic __NEXT_DATA__ so parsers work unchanged.
+    $act_id   = null;
+    $hotel_id = null;
+    if (preg_match('#/activity/(\d+)[-/]#i', $url, $m)) {
+        $act_id = (int) $m[1];
+    } elseif (preg_match('#/hotels?/(?:detail/)?(\d+)[-/]#i', $url, $m)) {
+        $hotel_id = (int) $m[1];
+    }
+
+    if ($act_id) {
+        $api_endpoints = array(
+            'https://www.klook.com/v1/activityDetail/getActivityInfo/?activity_id=' . $act_id . '&currency=USD&language=en-US',
+            'https://www.klook.com/api/seasoning/v2/activity/' . $act_id . '/?currency=USD&language=en-US',
+            'https://www.klook.com/api/merapi/v2/activity/detail/?activity_id=' . $act_id . '&currency=USD&language=en-US',
+        );
+        foreach ($api_endpoints as $api_ep) {
+            $api_r = self::remote_get($api_ep, array('timeout' => 30, 'headers' => array(
+                'Accept'          => 'application/json',
+                'Accept-Language' => 'en-US,en;q=0.9',
+                'Origin'          => 'https://www.klook.com',
+                'Referer'         => 'https://www.klook.com/',
+            )));
+            if (is_wp_error($api_r)) continue;
+            $api_body = wp_remote_retrieve_body($api_r);
+            if (empty($api_body)) continue;
+            $api_data = json_decode($api_body, true);
+            if (!is_array($api_data)) continue;
+            // Accept if data has meaningful content (result, data, or activity key)
+            $inner = isset($api_data['result']) ? $api_data['result']
+                   : (isset($api_data['data'])   ? $api_data['data'] : $api_data);
+            if (empty($inner) || (is_array($inner) && count($inner) < 2)) continue;
+            // Wrap as synthetic __NEXT_DATA__ so parse_klook_html works unchanged
+            $synth_data = array(
+                'props' => array('pageProps' => array(
+                    'dehydratedState' => array('queries' => array(array(
+                        'queryHash' => '["getActivityDetail",{"activityId":' . $act_id . '}]',
+                        'state'     => array('data' => $inner),
+                    ))),
+                )),
+                'query' => array('activityId' => $act_id),
+            );
+            $synth_html = '<html><head></head><body>'
+                . '<script id="__NEXT_DATA__" type="application/json">'
+                . wp_json_encode($synth_data)
+                . '</script></body></html>';
+            return array('body' => $synth_html, 'url' => $url, 'source' => 'klook_api');
+        }
+    } elseif ($hotel_id) {
+        $hotel_endpoints = array(
+            'https://www.klook.com/api/merapi/v2/hotel/detail/?hotel_id=' . $hotel_id . '&currency=USD&language=en-US',
+            'https://www.klook.com/v1/hotelDetail/getHotelInfo/?hotel_id=' . $hotel_id . '&currency=USD&language=en-US',
+        );
+        foreach ($hotel_endpoints as $api_ep) {
+            $api_r = self::remote_get($api_ep, array('timeout' => 30, 'headers' => array(
+                'Accept'          => 'application/json',
+                'Accept-Language' => 'en-US,en;q=0.9',
+                'Origin'          => 'https://www.klook.com',
+                'Referer'         => 'https://www.klook.com/',
+            )));
+            if (is_wp_error($api_r)) continue;
+            $api_body = wp_remote_retrieve_body($api_r);
+            if (empty($api_body)) continue;
+            $api_data = json_decode($api_body, true);
+            if (!is_array($api_data)) continue;
+            $inner = isset($api_data['result']) ? $api_data['result']
+                   : (isset($api_data['data'])   ? $api_data['data'] : $api_data);
+            if (empty($inner) || (is_array($inner) && count($inner) < 2)) continue;
+            $synth_data = array(
+                'props' => array('pageProps' => array(
+                    'dehydratedState' => array('queries' => array(array(
+                        'queryHash' => '["getHotelDetail",{"hotelId":' . $hotel_id . '}]',
+                        'state'     => array('data' => $inner),
+                    ))),
+                )),
+                'query' => array('hotelId' => $hotel_id),
+            );
+            $synth_html = '<html><head></head><body>'
+                . '<script id="__NEXT_DATA__" type="application/json">'
+                . wp_json_encode($synth_data)
+                . '</script></body></html>';
+            return array('body' => $synth_html, 'url' => $url, 'source' => 'klook_api_hotel');
+        }
+    }
+
+    // ── 3. ScraperAPI render=true + premium ───────────────────────────────────
+    if (!empty($sa_key)) {
         $sa_url = 'https://api.scraperapi.com?' . http_build_query(array(
             'api_key'      => $sa_key,
             'url'          => $url,
@@ -314,7 +436,7 @@ private static function fetch_klook_html($url) {
             }
             if (!$is_error_body($sa_b) && !empty($sa_b)) $best_body = $sa_b;
         }
-        // render=true without premium (fewer credits, works on lighter Cloudflare)
+        // render=true without premium
         $sa_url2 = 'https://api.scraperapi.com?' . http_build_query(array(
             'api_key'      => $sa_key,
             'url'          => $url,
@@ -331,7 +453,7 @@ private static function fetch_klook_html($url) {
         }
     }
 
-    // ── 2. Direct cURL with Chrome 124 headers (fast but Cloudflare-blocked) ─
+    // ── 4. Direct cURL ────────────────────────────────────────────────────────
     $r = self::remote_get($url, array('timeout' => 30));
     if (!is_wp_error($r)) {
         $b = wp_remote_retrieve_body($r);
@@ -341,7 +463,7 @@ private static function fetch_klook_html($url) {
         if (!empty($b) && empty($best_body)) $best_body = $b;
     }
 
-    // ── 3. Without /en-US/ locale ────────────────────────────────────
+    // ── 5. Without /en-US/ locale ─────────────────────────────────────────────
     if (strpos($url, '/en-US/') !== false) {
         $url_nl = preg_replace('#/en-US/#', '/', $url);
         $r2 = self::remote_get($url_nl, array('timeout' => 25));
@@ -353,47 +475,42 @@ private static function fetch_klook_html($url) {
         }
     }
 
-    // ── 4. Wayback Machine CDX API → precise timestamp → raw if_ fetch ─
-    // NOTE: Google Web Cache was permanently shut down in February 2024.
-    // We use the CDX API instead: it returns the exact snapshot timestamp,
-    // then we fetch the raw HTML using the "if_" modifier which strips the
-    // WB toolbar so __NEXT_DATA__ is preserved intact.
+    // ── 6. Wayback Machine CDX API (up to 3 timestamps, 3 years back) ─────────
     $url_bare = preg_replace('#^https?://#', '', rtrim($url, '/'));
     $cdx_q    = http_build_query(array(
         'url'    => $url_bare,
         'output' => 'json',
         'fl'     => 'timestamp',
-        'limit'  => 1,
-        'from'   => date('Ymd', strtotime('-1 year')),
+        'limit'  => 3,
+        'from'   => date('Ymd', strtotime('-3 years')),
         'to'     => date('Ymd'),
         'filter' => 'statuscode:200',
     ));
     $cdx_r = self::remote_get('https://web.archive.org/cdx/search/cdx?' . $cdx_q, array('timeout' => 25));
     if (!is_wp_error($cdx_r)) {
         $rows = json_decode(wp_remote_retrieve_body($cdx_r), true);
-        // Format: [["timestamp"], ["20241215120000"]]  (header row + data row)
-        if (is_array($rows) && count($rows) >= 2 && isset($rows[1][0])) {
-            $ts     = $rows[1][0];
-            // if_ = serve raw archived HTML without WB toolbar/banner
-            $wb_url = 'https://web.archive.org/web/' . $ts . 'if_/' . $url;
-            $wb_r   = self::remote_get($wb_url, array('timeout' => 60));
-            if (!is_wp_error($wb_r)) {
-                $wb_b = wp_remote_retrieve_body($wb_r);
-                if (!empty($wb_b) && strpos($wb_b, '__NEXT_DATA__') !== false) {
-                    return array('body' => $wb_b, 'url' => $url, 'source' => 'wayback_cdx');
+        if (is_array($rows) && count($rows) >= 2) {
+            foreach (array_slice($rows, 1) as $row) {
+                if (!isset($row[0])) continue;
+                $wb_url = 'https://web.archive.org/web/' . $row[0] . 'if_/' . $url;
+                $wb_r   = self::remote_get($wb_url, array('timeout' => 60));
+                if (!is_wp_error($wb_r)) {
+                    $wb_b = wp_remote_retrieve_body($wb_r);
+                    if (!empty($wb_b) && strpos($wb_b, '__NEXT_DATA__') !== false) {
+                        return array('body' => $wb_b, 'url' => $url, 'source' => 'wayback_cdx');
+                    }
+                    if (!empty($wb_b) && empty($best_body)) $best_body = $wb_b;
                 }
-                if (!empty($wb_b) && empty($best_body)) $best_body = $wb_b;
             }
         }
     }
 
-    // ── 5. Wayback Machine availability API (simpler fallback) ────────
+    // ── 7. Wayback Machine availability API (simpler fallback) ───────────────
     $avail_r = self::remote_get('https://archive.org/wayback/available?url=' . rawurlencode($url_bare), array('timeout' => 20));
     if (!is_wp_error($avail_r)) {
         $avail = json_decode(wp_remote_retrieve_body($avail_r), true);
         $snap  = isset($avail['archived_snapshots']['closest']['url']) ? $avail['archived_snapshots']['closest']['url'] : '';
         if (!empty($snap)) {
-            // Convert standard WB URL to if_ (raw) version
             $snap_raw = preg_replace('#/web/(\d+)/#', '/web/${1}if_/', $snap);
             $snap_r   = self::remote_get($snap_raw, array('timeout' => 60));
             if (!is_wp_error($snap_r)) {
