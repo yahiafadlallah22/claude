@@ -828,6 +828,18 @@ class FTH_Admin {
                 Import from Klook
             </h1>
             <div class="notice notice-info"><p><strong>Step 1:</strong> Import or create the city. <strong>Step 2:</strong> import one activity or hotel to validate the layout. <strong>Step 3:</strong> use the bulk city importer for activities or hotels. <strong>Step 4:</strong> regenerate hubs and refresh permalinks once if a new city page returns 404.</p></div>
+            <?php
+            $sa_key = get_option('fth_scraperapi_key', '');
+            if (empty($sa_key)) : ?>
+            <div class="notice notice-error" style="border-left-color:#dc2626;padding:14px 18px;background:#fef2f2;">
+                <p style="margin:0;font-size:14px;color:#7f1d1d;">
+                    <strong>⚠️ ScraperAPI non configurée — les imports seront vides !</strong><br>
+                    Klook utilise Cloudflare qui bloque tous les bots. Sans ScraperAPI, le plugin ne peut pas récupérer les descriptions, prix, FAQ, images ni aucune donnée de détail.
+                    <strong><a href="<?php echo admin_url('admin.php?page=fth-settings'); ?>" style="color:#dc2626">→ Configurer ScraperAPI maintenant</a></strong>
+                    (créer un compte gratuit sur scraperapi.com → copier la clé API dans Réglages)
+                </p>
+            </div>
+            <?php endif; ?>
             
             <div class="fth-import-container">
                 <!-- Import Activity -->

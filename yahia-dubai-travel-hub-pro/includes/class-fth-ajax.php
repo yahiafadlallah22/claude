@@ -564,6 +564,30 @@ private static function html_paragraphs($value) {
     return '<p>' . esc_html($text) . '</p>';
 }
 
+/**
+ * Extract a list of text items from a value that may be a flat array of strings,
+ * an array of objects (Klook style: {content, description, text, name, ...}),
+ * or a plain string. Returns newline-joined text.
+ */
+private static function extract_list_items($value, $limit = 12) {
+    if (empty($value)) return '';
+    if (is_array($value) && isset($value[0])) {
+        $lines = array();
+        foreach (array_slice($value, 0, $limit) as $item) {
+            if (is_string($item) && trim($item) !== '') {
+                $lines[] = trim(wp_strip_all_tags($item));
+            } elseif (is_array($item)) {
+                $text = self::normalize_text_block(
+                    self::array_find_first($item, array('content','description','text','name','title','detail','label','value'))
+                );
+                if ($text !== '') $lines[] = $text;
+            }
+        }
+        return implode("\n", array_filter($lines));
+    }
+    return self::bullet_lines($value, $limit);
+}
+
 private static function bullet_lines($value, $limit = 8) {
     $text = self::normalize_text_block($value);
     if ($text === '') {
@@ -2142,6 +2166,7 @@ public static function import_bulk_city() {
         if (!empty($data['inclusions']))     update_post_meta($post_id, '_fth_inclusions', $data['inclusions']);
         if (!empty($data['exclusions']))     update_post_meta($post_id, '_fth_exclusions', $data['exclusions']);
         if (!empty($data['faq']))            update_post_meta($post_id, '_fth_faq', $data['faq']);
+        if (!empty($data['meeting_point']))  update_post_meta($post_id, '_fth_meeting_point', $data['meeting_point']);
         if (!empty($data['image']))          update_post_meta($post_id, '_fth_external_image', $data['image']);
         if (!empty($data['affiliate_link'])) update_post_meta($post_id, '_fth_affiliate_link', $data['affiliate_link']);
         if (!empty($data['activity_id']))    update_post_meta($post_id, '_fth_klook_activity_id', $data['activity_id']);
@@ -3504,24 +3529,34 @@ if ($next_data_raw !== '') {
         }
 
         if (empty($data['highlights'])) {
-            $highlights_text = self::bullet_lines(self::array_find_first($next_props, array('highlight_list','highlights','activityHighlights','keyHighlights','highlightsText')), 10);
-            if ($highlights_text !== '') {
-                $data['highlights'] = $highlights_text;
+            $hl_raw = self::array_find_first($next_props, array('highlight_list','highlights','activityHighlights','keyHighlights','highlightsText'));
+            if (!empty($hl_raw)) {
+                // Klook stores highlight_list as [{title, content}, ...] — extract title + content per item
+                if (is_array($hl_raw) && isset($hl_raw[0]) && is_array($hl_raw[0])) {
+                    $hl_lines = array();
+                    foreach (array_slice($hl_raw, 0, 10) as $item) {
+                        $t = self::normalize_text_block(self::array_find_first($item, array('title','name','highlight','label','text')));
+                        $c = self::normalize_text_block(self::array_find_first($item, array('content','description','detail','desc')));
+                        if ($t && $c) $hl_lines[] = $t . ': ' . wp_trim_words($c, 20, '...');
+                        elseif ($t)   $hl_lines[] = $t;
+                        elseif ($c)   $hl_lines[] = wp_trim_words($c, 20, '...');
+                    }
+                    if (!empty($hl_lines)) $data['highlights'] = implode("\n", $hl_lines);
+                } else {
+                    $highlights_text = self::bullet_lines($hl_raw, 10);
+                    if ($highlights_text !== '') $data['highlights'] = $highlights_text;
+                }
             }
         }
 
         if (empty($data['inclusions'])) {
-            $inc_text = self::bullet_lines(self::array_find_first($next_props, array('inclusion_list','inclusions','included','packageInclusions','whatIsIncluded','what_is_included')), 12);
-            if ($inc_text !== '') {
-                $data['inclusions'] = $inc_text;
-            }
+            $inc_raw = self::array_find_first($next_props, array('inclusion_list','inclusions','included','packageInclusions','whatIsIncluded','what_is_included'));
+            $data['inclusions'] = self::extract_list_items($inc_raw, 12);
         }
 
         if (empty($data['exclusions'])) {
-            $exc_text = self::bullet_lines(self::array_find_first($next_props, array('exclusion_list','exclusions','excluded','whatIsExcluded','what_is_excluded')), 12);
-            if ($exc_text !== '') {
-                $data['exclusions'] = $exc_text;
-            }
+            $exc_raw = self::array_find_first($next_props, array('exclusion_list','exclusions','excluded','whatIsExcluded','what_is_excluded'));
+            $data['exclusions'] = self::extract_list_items($exc_raw, 12);
         }
 
         if (empty($data['meeting_point'])) {
@@ -3641,17 +3676,30 @@ if ($next_data_raw !== '') {
             }
         }
 
-        // Extract FAQ if available
+        // Extract FAQ — Klook uses faq_list with question_content / answer_content keys
         if (empty($data['faq'])) {
-            $faq_candidate = self::array_find_first($next_props, array('faq_list','faq','faqs','faqList','question_answer_list','questionAnswer','qAndA'));
-            if (!empty($faq_candidate)) {
+            // Search all possible FAQ container keys across entire props tree
+            $faq_candidate = self::array_find_first($next_props, array(
+                'faq_list','faqList','faqs','faq','question_answer_list','questionAnswerList','qAndA','questionAnswer',
+                'activityFaq','activity_faq','helpInfo','help_info',
+            ));
+            if (!empty($faq_candidate) && is_array($faq_candidate)) {
                 $faq_lines = array();
-                if (is_array($faq_candidate)) {
-                    foreach (array_slice((array) $faq_candidate, 0, 6) as $item) {
-                        $q = self::normalize_text_block(is_array($item) ? self::array_find_first($item, array('question','question_content','title','q')) : '');
-                        $a = self::normalize_text_block(is_array($item) ? self::array_find_first($item, array('answer','answer_content','content','a')) : '');
-                        if ($q && $a) $faq_lines[] = 'Q: ' . $q . "\nA: " . $a;
-                    }
+                // Handle nested wrapper: {list: [...]} or {data: [...]}
+                $items = $faq_candidate;
+                if (!isset($faq_candidate[0])) {
+                    $inner = self::array_find_first($faq_candidate, array('list','data','items','questions'));
+                    if (is_array($inner) && isset($inner[0])) $items = $inner;
+                }
+                foreach (array_slice((array) $items, 0, 8) as $item) {
+                    if (!is_array($item)) continue;
+                    $q = self::normalize_text_block(self::array_find_first($item, array(
+                        'question_content','question','questionContent','title','q','name',
+                    )));
+                    $a = self::normalize_text_block(self::array_find_first($item, array(
+                        'answer_content','answer','answerContent','content','a','description','desc',
+                    )));
+                    if ($q && $a) $faq_lines[] = 'Q: ' . $q . "\nA: " . $a;
                 }
                 if (!empty($faq_lines)) $data['faq'] = implode("\n\n", $faq_lines);
             }
