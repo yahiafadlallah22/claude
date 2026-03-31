@@ -285,10 +285,7 @@ private static function fetch_klook_html($url) {
 
     $sa_key = self::get_scraperapi_key();
 
-    // ── 1. Klook JSON API (bypasses DataDome entirely — API ≠ browser) ───────
-    // DataDome targets browser-type traffic. Klook's own mobile/app API endpoints
-    // return JSON directly and are not behind the DataDome challenge.
-    // We wrap the JSON response as synthetic __NEXT_DATA__ so parsers work unchanged.
+    // ── Extract IDs from URL ───────────────────────────────────────────────────
     $act_id   = null;
     $hotel_id = null;
     if (preg_match('#/activity/(\d+)[-/]#i', $url, $m)) {
@@ -296,6 +293,50 @@ private static function fetch_klook_html($url) {
     } elseif (preg_match('#/hotels?/(?:detail/)?(\d+)[-/]#i', $url, $m)) {
         $hotel_id = (int) $m[1];
     }
+
+    // ── 0. Listing cache (set during discover_import_urls — instant, no HTTP) ─
+    // When the listing API was called during discovery, item data was stored in a
+    // transient. Use it directly to skip all network calls entirely.
+    $build_synth_html = function($inner, $id_key, $id_val, $query_key) {
+        $page_props = array_merge($inner, array(
+            'dehydratedState' => array('queries' => array(array(
+                'queryHash' => '["get' . $query_key . '",{"' . $id_key . '":' . $id_val . '}]',
+                'state'     => array('data' => $inner),
+            ))),
+        ));
+        return '<html><head></head><body>'
+            . '<script id="__NEXT_DATA__" type="application/json">'
+            . wp_json_encode(array(
+                'props' => array('pageProps' => $page_props),
+                'query' => array($id_key => $id_val),
+            ))
+            . '</script></body></html>';
+    };
+
+    if ($act_id) {
+        $cached = get_transient('fth_klook_act_' . $act_id);
+        if (is_array($cached) && count($cached) >= 2) {
+            return array(
+                'body'   => $build_synth_html($cached, 'activityId', $act_id, 'ActivityDetail'),
+                'url'    => $url,
+                'source' => 'listing_cache',
+            );
+        }
+    } elseif ($hotel_id) {
+        $cached = get_transient('fth_klook_htl_' . $hotel_id);
+        if (is_array($cached) && count($cached) >= 2) {
+            return array(
+                'body'   => $build_synth_html($cached, 'hotelId', $hotel_id, 'HotelDetail'),
+                'url'    => $url,
+                'source' => 'listing_cache',
+            );
+        }
+    }
+
+    // ── 1. Klook JSON API (bypasses DataDome entirely — API ≠ browser) ───────
+    // DataDome targets browser-type traffic. Klook's own mobile/app API endpoints
+    // return JSON directly and are not behind the DataDome challenge.
+    // We wrap the JSON response as synthetic __NEXT_DATA__ so parsers work unchanged.
 
     // Helper: drill through common API wrappers to find actual payload
     // Klook APIs often return {"result": {"code": 0, "data": {...real_data...}}}
@@ -368,7 +409,7 @@ private static function fetch_klook_html($url) {
 
         // 2a. Direct API calls (no ScraperAPI, no rendering — fastest)
         foreach ($api_endpoints as $api_ep) {
-            $api_data = $try_klook_api_call($api_ep, 30);
+            $api_data = $try_klook_api_call($api_ep, 8);
             if (!$api_data) continue;
             $inner = $extract_api_payload($api_data);
             if ($inner && count($inner) >= 2) { $api_source = 'klook_api'; break; }
@@ -429,7 +470,7 @@ private static function fetch_klook_html($url) {
 
         // 2a. Direct API calls
         foreach ($hotel_endpoints as $api_ep) {
-            $api_data = $try_klook_api_call($api_ep, 30);
+            $api_data = $try_klook_api_call($api_ep, 8);
             if (!$api_data) continue;
             $inner = $extract_api_payload($api_data);
             if ($inner && count($inner) >= 2) { $api_source = 'klook_api_hotel'; break; }
@@ -705,6 +746,8 @@ private static function fetch_klook_listing_via_api($type, $city_id, $limit = 10
                     $hid  = (string) self::array_find_first($item, array('hotel_id','hotelId','id','property_id'));
                     $slug = (string) self::array_find_first($item, array('hotel_url_name','urlName','slug','hotel_slug','seoName','url_name','name_slug'));
                     if (empty($hid) || !is_numeric($hid)) continue;
+                    // Cache listing item data so import can use it without extra API calls
+                    set_transient('fth_klook_htl_' . $hid, $item, 6 * HOUR_IN_SECONDS);
                     if (!empty($slug)) {
                         $slug = preg_replace('/[^a-z0-9-]/i', '-', strtolower(trim($slug)));
                         $u = 'https://www.klook.com/en-US/hotels/' . $hid . '-' . $slug . '/';
@@ -717,7 +760,7 @@ private static function fetch_klook_listing_via_api($type, $city_id, $limit = 10
             }
             if (count($urls) > $ep_urls_before) { $working_tpl = $tpl; break; }
         }
-        // Pass 2: if all direct calls failed, retry best endpoint via ScraperAPI proxy
+        // Pass 2: if all direct calls failed, retry via ScraperAPI proxy
         if (empty($urls) && $sa_key) {
             foreach ($list_endpoints as $tpl) {
                 $ep_urls_before = count($urls);
@@ -732,6 +775,7 @@ private static function fetch_klook_listing_via_api($type, $city_id, $limit = 10
                         $hid  = (string) self::array_find_first($item, array('hotel_id','hotelId','id','property_id'));
                         $slug = (string) self::array_find_first($item, array('hotel_url_name','urlName','slug','hotel_slug','seoName','url_name','name_slug'));
                         if (empty($hid) || !is_numeric($hid)) continue;
+                        set_transient('fth_klook_htl_' . $hid, $item, 6 * HOUR_IN_SECONDS);
                         if (!empty($slug)) {
                             $slug = preg_replace('/[^a-z0-9-]/i', '-', strtolower(trim($slug)));
                             $u = 'https://www.klook.com/en-US/hotels/' . $hid . '-' . $slug . '/';
@@ -766,6 +810,8 @@ private static function fetch_klook_listing_via_api($type, $city_id, $limit = 10
                     $aid  = (string) self::array_find_first($item, array('activity_id','activityId','id'));
                     $slug = (string) self::array_find_first($item, array('url_name','urlName','seo_name','seoName','slug','activity_url'));
                     if (empty($aid) || !is_numeric($aid)) continue;
+                    // Cache listing item data so import can use it without extra API calls
+                    set_transient('fth_klook_act_' . $aid, $item, 6 * HOUR_IN_SECONDS);
                     if (!empty($slug)) {
                         $slug = preg_replace('/[^a-z0-9-]/i', '-', strtolower(trim($slug)));
                         $u = 'https://www.klook.com/en-US/activity/' . $aid . '-' . $slug . '/';
@@ -793,6 +839,7 @@ private static function fetch_klook_listing_via_api($type, $city_id, $limit = 10
                         $aid  = (string) self::array_find_first($item, array('activity_id','activityId','id'));
                         $slug = (string) self::array_find_first($item, array('url_name','urlName','seo_name','seoName','slug','activity_url'));
                         if (empty($aid) || !is_numeric($aid)) continue;
+                        set_transient('fth_klook_act_' . $aid, $item, 6 * HOUR_IN_SECONDS);
                         if (!empty($slug)) {
                             $slug = preg_replace('/[^a-z0-9-]/i', '-', strtolower(trim($slug)));
                             $u = 'https://www.klook.com/en-US/activity/' . $aid . '-' . $slug . '/';
