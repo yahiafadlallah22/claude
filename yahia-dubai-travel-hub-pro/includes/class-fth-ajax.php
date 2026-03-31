@@ -1127,7 +1127,8 @@ private static function clean_image_urls($urls, $limit = 5) {
     $priority = array();
     $rest     = array();
     foreach ((array) $urls as $url) {
-        $url = esc_url_raw(html_entity_decode((string) $url, ENT_QUOTES, 'UTF-8'));
+        $url = self::unwrap_wayback_url((string) $url); // strip Wayback Machine wrapper if present
+        $url = esc_url_raw(html_entity_decode($url, ENT_QUOTES, 'UTF-8'));
         // ── Upgrade Klook Cloudinary URLs to 1080×720 BEFORE filtering ──────
         // This normalises all size-variants of the same photo to an identical URL,
         // so the deduplication below removes them correctly.
@@ -3226,9 +3227,10 @@ public static function import_bulk_city() {
         if (!empty($data['hotel_id'])) update_post_meta($post_id, '_fth_klook_hotel_id', $data['hotel_id']);
         update_post_meta($post_id, '_fth_fetch_source', $fetch_source);
         // Save hotel details fields
-        if (!empty($data['highlights'])) update_post_meta($post_id, '_fth_highlights', $data['highlights']);
-        if (!empty($data['inclusions'])) update_post_meta($post_id, '_fth_inclusions', $data['inclusions']);
-        if (!empty($data['faq']))        update_post_meta($post_id, '_fth_faq', $data['faq']);
+        if (!empty($data['highlights']))  update_post_meta($post_id, '_fth_highlights',  $data['highlights']);
+        if (!empty($data['inclusions']))  update_post_meta($post_id, '_fth_inclusions',  $data['inclusions']);
+        if (!empty($data['exclusions']))  update_post_meta($post_id, '_fth_exclusions',  $data['exclusions']);
+        if (!empty($data['faq']))         update_post_meta($post_id, '_fth_faq',         $data['faq']);
         self::import_post_images($post_id, !empty($data['image']) ? $data['image'] : '', !empty($data['images']) && is_array($data['images']) ? $data['images'] : array());
         $thumb_id = get_post_thumbnail_id($post_id);
         if (!empty($params['city'])) {
@@ -3486,6 +3488,11 @@ public static function import_bulk_city() {
                 if (empty($data['inclusions'])) {
                     $inc = self::bullet_lines(self::array_find_first($props, array('inclusions','included','packageInclusions','rateInclusions')), 10);
                     if ($inc !== '') $data['inclusions'] = $inc;
+                }
+                // Hotel exclusions (what's NOT included)
+                if (empty($data['exclusions'])) {
+                    $exc = self::bullet_lines(self::array_find_first($props, array('exclusions','excluded','notIncluded','packageExclusions','rateExclusions')), 10);
+                    if ($exc !== '') $data['exclusions'] = $exc;
                 }
                 // Hotel FAQ
                 if (empty($data['faq'])) {
