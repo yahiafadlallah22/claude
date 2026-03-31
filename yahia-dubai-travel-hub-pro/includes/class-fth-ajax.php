@@ -66,8 +66,10 @@ private static function begin_import_request() {
     if (function_exists('ignore_user_abort')) {
         @ignore_user_abort(true);
     }
-    @set_time_limit(300);
+    @set_time_limit(0); // unlimited — individual wp_remote_get calls have their own timeouts
+    @ini_set('memory_limit', '256M');
     @ini_set('display_errors', '0');
+    @ob_start(); // buffer any stray output so it doesn't corrupt JSON responses
 }
 
 private static function send_json_success_clean($data = array()) {
@@ -234,7 +236,7 @@ private static function fetch_klook_listing_html($url) {
             'render'        => 'true',
             'country_code'  => 'us',
         ));
-        $sa_r_up = self::remote_get($sa_url_up, array('timeout' => 120));
+        $sa_r_up = self::remote_get($sa_url_up, array('timeout' => 60));
         if (!is_wp_error($sa_r_up)) {
             $sa_b_up = wp_remote_retrieve_body($sa_r_up);
             if (!$is_sa_err($sa_b_up) && $is_valid_listing($sa_b_up)) {
@@ -250,7 +252,7 @@ private static function fetch_klook_listing_html($url) {
             'premium'      => 'true',
             'country_code' => 'us',
         ));
-        $sa_r = self::remote_get($sa_url, array('timeout' => 60));
+        $sa_r = self::remote_get($sa_url, array('timeout' => 45));
         if (!is_wp_error($sa_r)) {
             $sa_b = wp_remote_retrieve_body($sa_r);
             if (!$is_sa_err($sa_b) && $is_valid_listing($sa_b)) {
@@ -265,7 +267,7 @@ private static function fetch_klook_listing_html($url) {
             'render'       => 'true',
             'country_code' => 'us',
         ));
-        $sa_r2 = self::remote_get($sa_url2, array('timeout' => 60));
+        $sa_r2 = self::remote_get($sa_url2, array('timeout' => 45));
         if (!is_wp_error($sa_r2)) {
             $sa_b2 = wp_remote_retrieve_body($sa_r2);
             if (!$is_sa_err($sa_b2) && !empty($sa_b2)) return $sa_b2;
@@ -338,7 +340,7 @@ private static function fetch_klook_html($url) {
             'render'        => 'true',
             'country_code'  => 'us',
         ));
-        $sa_r_up = self::remote_get($sa_url_up, array('timeout' => 180));
+        $sa_r_up = self::remote_get($sa_url_up, array('timeout' => 60));
         if (!is_wp_error($sa_r_up)) {
             $sa_b_up = wp_remote_retrieve_body($sa_r_up);
             if (!$is_error_body($sa_b_up) && strpos($sa_b_up, '__NEXT_DATA__') !== false) {
@@ -355,7 +357,7 @@ private static function fetch_klook_html($url) {
             'premium'      => 'true',
             'country_code' => 'us',
         ));
-        $sa_r_us = self::remote_get($sa_url_us, array('timeout' => 120));
+        $sa_r_us = self::remote_get($sa_url_us, array('timeout' => 45));
         if (!is_wp_error($sa_r_us)) {
             $sa_b_us = wp_remote_retrieve_body($sa_r_us);
             if (!$is_error_body($sa_b_us) && strpos($sa_b_us, '__NEXT_DATA__') !== false) {
@@ -371,7 +373,7 @@ private static function fetch_klook_html($url) {
             'render'       => 'true',
             'country_code' => 'us',
         ));
-        $sa_r_r = self::remote_get($sa_url_r, array('timeout' => 120));
+        $sa_r_r = self::remote_get($sa_url_r, array('timeout' => 45));
         if (!is_wp_error($sa_r_r)) {
             $sa_b_r = wp_remote_retrieve_body($sa_r_r);
             if (!$is_error_body($sa_b_r) && strpos($sa_b_r, '__NEXT_DATA__') !== false) {
@@ -2036,6 +2038,8 @@ public static function import_single_live() {
         self::send_json_error_clean('No URL provided');
     }
 
+    try {
+
     // ── Resolve city WP term by slug/name when only name is available ──────
     if (!$city && ($city_slug || $city_name)) {
         $found = $city_slug ? get_term_by('slug', $city_slug, 'travel_city')
@@ -2100,6 +2104,10 @@ public static function import_single_live() {
         'discount'     => $discount,
         'fetch_source' => get_post_meta($post_id, '_fth_fetch_source', true),
     ));
+
+    } catch (\Throwable $e) {
+        self::send_json_error_clean('Import error: ' . $e->getMessage());
+    }
 }
 
 /**
