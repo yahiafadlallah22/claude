@@ -714,6 +714,9 @@ private static function fetch_klook_listing_via_api($type, $city_id, $limit = 10
             'https://www.klook.com/api/merapi/v2/hotel/search/?city_id=%d&currency=USD&language=en-US&page=%d&page_size=20',
             'https://www.klook.com/v1/hotellist/getCityHotelList/?city_id=%d&currency=USD&language=en-US&page=%d&per_page=20',
             'https://www.klook.com/v1/hotelList/getHotelList/?city_id=%d&currency=USD&language=en-US&page=%d&limit=20',
+            'https://www.klook.com/api/merapi/v1/accommodation/list/?city_id=%d&currency=USD&language=en-US&page=%d&page_size=20',
+            'https://www.klook.com/v1/htl/search/?city_id=%d&currency=USD&language=en-US&page=%d&per_page=20',
+            'https://www.klook.com/api/merapi/v2/accommodation/search/?city_id=%d&currency=USD&language=en-US&page=%d&page_size=20',
         );
         foreach ($list_endpoints as $tpl) {
             if (count($urls) >= $limit) break;
@@ -784,6 +787,37 @@ private static function fetch_klook_listing_via_api($type, $city_id, $limit = 10
  */
 private static function lookup_klook_city_id_from_slug($city_slug) {
     if (empty($city_slug)) return '';
+
+    // Hardcoded map for common cities — avoids a blocked API round-trip.
+    // IDs confirmed from Klook destination URLs (/destination/cXXX-slug/).
+    static $known = array(
+        'dubai'        => '289',
+        'abu-dhabi'    => '25',
+        'doha'         => '63',
+        'riyadh'       => '65',
+        'jeddah'       => '66',
+        'muscat'       => '91',
+        'kuwait-city'  => '92',
+        'manama'       => '90',
+        'cairo'        => '71',
+        'marrakech'    => '106',
+        'bangkok'      => '3',
+        'singapore'    => '18',
+        'hong-kong'    => '1',
+        'tokyo'        => '12',
+        'osaka'        => '13',
+        'london'       => '71',
+        'paris'        => '57',
+        'barcelona'    => '93',
+        'rome'         => '99',
+        'istanbul'     => '101',
+        'bali'         => '5',
+        'phuket'       => '8',
+        'seoul'        => '22',
+        'new-york'     => '88',
+    );
+    if (isset($known[$city_slug])) return $known[$city_slug];
+
     $query   = str_replace('-', ' ', $city_slug);
     $headers = array('Accept' => 'application/json', 'Accept-Language' => 'en-US,en;q=0.9', 'X-Requested-With' => 'XMLHttpRequest');
     $sa_key  = self::get_scraperapi_key();
@@ -850,41 +884,79 @@ private static function discover_klook_urls_via_cdx($type, $city_slug, $limit = 
     if (empty($city_slug)) return array();
 
     if ($type === 'hotel') {
-        // Hotel URLs like /hotels/12345-some-name/ do NOT contain the city slug,
-        // so we cannot filter CDX hotel detail URLs by city name.
-        // Instead: find archived snapshots of the HOTEL LISTING page for this city,
-        // then parse them to extract hotel IDs (which do belong to this city).
-        $listing_urls = array(
-            'www.klook.com/en-US/hotels/' . $city_slug . '/',
-            'www.klook.com/hotels/' . $city_slug . '/',
-        );
-        foreach ($listing_urls as $lu) {
-            $cdx_q = http_build_query(array(
-                'url'    => $lu,
-                'output' => 'json',
-                'fl'     => 'timestamp',
-                'limit'  => 5,
-                'from'   => date('Ymd', strtotime('-3 years')),
-                'to'     => date('Ymd'),
-            ));
-            $r = self::remote_get('https://web.archive.org/cdx/search/cdx?' . $cdx_q, array('timeout' => 25));
-            if (is_wp_error($r)) continue;
+        // Hotel detail URLs like /hotels/12345-grand-hyatt-dubai/ often contain the city name.
+        // We search CDX for hotel detail pages whose URL contains the city slug.
+        // This works well for major cities (Dubai, Abu Dhabi, Bangkok, etc.) where hotels
+        // typically include the city in their name/slug.
+        $q = http_build_query(array(
+            'url'       => 'www.klook.com/en-US/hotels/',
+            'output'    => 'json',
+            'fl'        => 'original',
+            'collapse'  => 'urlkey',
+            'limit'     => min($limit * 4, 400),
+            'matchType' => 'prefix',
+            'from'      => date('Ymd', strtotime('-3 years')),
+            'to'        => date('Ymd'),
+        ));
+        // Filter: must be a numbered hotel detail URL AND contain the city slug
+        $q .= '&filter=original:.*hotels%2F[0-9].*';
+        $q .= '&filter=original:.*' . rawurlencode($city_slug) . '.*';
+
+        $r = self::remote_get('https://web.archive.org/cdx/search/cdx?' . $q, array('timeout' => 35));
+        $urls = array();
+        if (!is_wp_error($r)) {
             $rows = json_decode(wp_remote_retrieve_body($r), true);
-            if (!is_array($rows) || count($rows) < 2) continue;
-            foreach (array_slice($rows, 1) as $row) {
-                if (empty($row[0])) continue;
-                $wb_url = 'https://web.archive.org/web/' . $row[0] . 'if_/https://' . $lu;
-                $wb_r   = self::remote_get($wb_url, array('timeout' => 60));
-                if (is_wp_error($wb_r)) continue;
-                $wb_b   = wp_remote_retrieve_body($wb_r);
-                if (empty($wb_b)) continue;
-                $hotel_links = self::extract_hotel_links_from_html($wb_b);
-                if (!empty($hotel_links)) {
-                    return array_slice(array_values(array_unique($hotel_links)), 0, $limit);
+            if (is_array($rows) && count($rows) >= 2) {
+                foreach (array_slice($rows, 1) as $row) {
+                    $u = isset($row[0]) ? $row[0] : '';
+                    if (!$u || !preg_match('#/hotels?/(?:detail/)?\d+[/-]#i', $u)) continue;
+                    if (!preg_match('#^https?://#', $u)) $u = 'https://' . $u;
+                    $u = preg_replace('#(klook\.com)/[a-z]{2}[-_][A-Za-z]{2,4}/#', '$1/en-US/', $u);
+                    if (!in_array($u, $urls, true)) $urls[] = $u;
+                    if (count($urls) >= $limit) break;
                 }
             }
         }
-        return array();
+
+        // Secondary: also try archived snapshots of the hotel LISTING page for this city.
+        // Klook hotel listing pages are JS SPAs, but some older snapshots may have hotel links.
+        if (count($urls) < $limit) {
+            $listing_urls = array(
+                'www.klook.com/en-US/hotels/' . $city_slug . '/',
+                'www.klook.com/hotels/' . $city_slug . '/',
+            );
+            foreach ($listing_urls as $lu) {
+                $cdx_q = http_build_query(array(
+                    'url'    => $lu,
+                    'output' => 'json',
+                    'fl'     => 'timestamp',
+                    'limit'  => 5,
+                    'from'   => date('Ymd', strtotime('-4 years')),
+                    'to'     => date('Ymd'),
+                ));
+                $lr = self::remote_get('https://web.archive.org/cdx/search/cdx?' . $cdx_q, array('timeout' => 20));
+                if (is_wp_error($lr)) continue;
+                $lrows = json_decode(wp_remote_retrieve_body($lr), true);
+                if (!is_array($lrows) || count($lrows) < 2) continue;
+                foreach (array_slice($lrows, 1) as $lrow) {
+                    if (empty($lrow[0])) continue;
+                    // Use if_ mode: returns raw HTML without Wayback URL rewrites
+                    $wb_url = 'https://web.archive.org/web/' . $lrow[0] . 'if_/https://' . $lu;
+                    $wb_r   = self::remote_get($wb_url, array('timeout' => 60));
+                    if (is_wp_error($wb_r)) continue;
+                    $wb_b   = wp_remote_retrieve_body($wb_r);
+                    if (empty($wb_b)) continue;
+                    $wb_b   = self::strip_wayback_rewrites($wb_b); // safety strip
+                    $hotel_links = self::extract_hotel_links_from_html($wb_b);
+                    foreach ($hotel_links as $hl) {
+                        if (!in_array($hl, $urls, true)) $urls[] = $hl;
+                    }
+                    if (count($urls) >= $limit) break 2;
+                }
+            }
+        }
+
+        return array_slice(array_values(array_unique($urls)), 0, $limit);
     } else {
         // Activity URLs: /en-US/activity/{id}-{slug-containing-city}/
         // Use CDX with city slug filter on the original URL
