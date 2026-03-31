@@ -226,54 +226,8 @@ private static function fetch_klook_listing_html($url) {
         if ($is_valid_listing($b)) return $b;
     }
 
-    // 2. ScraperAPI ultra_premium (DataDome bypass — listing pages also behind DataDome)
-    $sa_key = self::get_scraperapi_key();
-    if (!empty($sa_key)) {
-        $sa_url_up = 'https://api.scraperapi.com?' . http_build_query(array(
-            'api_key'       => $sa_key,
-            'url'           => $url,
-            'ultra_premium' => 'true',
-            'render'        => 'true',
-            'country_code'  => 'us',
-        ));
-        $sa_r_up = self::remote_get($sa_url_up, array('timeout' => 60));
-        if (!is_wp_error($sa_r_up)) {
-            $sa_b_up = wp_remote_retrieve_body($sa_r_up);
-            if (!$is_sa_err($sa_b_up) && $is_valid_listing($sa_b_up)) {
-                return $sa_b_up;
-            }
-        }
-
-        // 3. ScraperAPI premium fallback
-        $sa_url = 'https://api.scraperapi.com?' . http_build_query(array(
-            'api_key'      => $sa_key,
-            'url'          => $url,
-            'render'       => 'true',
-            'premium'      => 'true',
-            'country_code' => 'us',
-        ));
-        $sa_r = self::remote_get($sa_url, array('timeout' => 45));
-        if (!is_wp_error($sa_r)) {
-            $sa_b = wp_remote_retrieve_body($sa_r);
-            if (!$is_sa_err($sa_b) && $is_valid_listing($sa_b)) {
-                return $sa_b;
-            }
-        }
-
-        // 4. ScraperAPI without premium as fallback
-        $sa_url2 = 'https://api.scraperapi.com?' . http_build_query(array(
-            'api_key'      => $sa_key,
-            'url'          => $url,
-            'render'       => 'true',
-            'country_code' => 'us',
-        ));
-        $sa_r2 = self::remote_get($sa_url2, array('timeout' => 45));
-        if (!is_wp_error($sa_r2)) {
-            $sa_b2 = wp_remote_retrieve_body($sa_r2);
-            if (!$is_sa_err($sa_b2) && !empty($sa_b2)) return $sa_b2;
-        }
-    }
-
+    // DataDome blocks ScraperAPI rendering on listing pages — skip directly to
+    // the caller's JSON API fallback by returning empty here.
     return '';
 }
 
