@@ -333,11 +333,28 @@ private static function fetch_klook_html($url) {
         }
     }
 
-    // ── 1. Klook JSON API (bypasses DataDome entirely — API ≠ browser) ───────
-    // DataDome targets browser-type traffic. Klook's own mobile/app API endpoints
-    // return JSON directly and are not behind the DataDome challenge.
-    // We wrap the JSON response as synthetic __NEXT_DATA__ so parsers work unchanged.
+    // ── 1. ScraperAPI ultra_premium — JS render + DataDome bypass ────────────
+    // Tried FIRST (before JSON API) so total time = ~60s max, within server timeouts.
+    // This is the strategy that was working before and handles all DataDome-blocked pages.
+    if (!empty($sa_key)) {
+        $sa_url_up = 'https://api.scraperapi.com?' . http_build_query(array(
+            'api_key'       => $sa_key,
+            'url'           => $url,
+            'ultra_premium' => 'true',
+            'render'        => 'true',
+            'country_code'  => 'us',
+        ));
+        $sa_r_up = self::remote_get($sa_url_up, array('timeout' => 60));
+        if (!is_wp_error($sa_r_up)) {
+            $sa_b_up = wp_remote_retrieve_body($sa_r_up);
+            if (!$is_error_body($sa_b_up) && strpos($sa_b_up, '__NEXT_DATA__') !== false) {
+                return array('body' => $sa_b_up, 'url' => $url, 'source' => 'scraperapi_ultra');
+            }
+            if (!$is_error_body($sa_b_up) && !empty($sa_b_up)) $best_body = $sa_b_up;
+        }
+    }
 
+    // ── 2. Klook JSON API (fast fallback — bypasses DataDome entirely) ────────
     // Helper: drill through common API wrappers to find actual payload
     // Klook APIs often return {"result": {"code": 0, "data": {...real_data...}}}
     // or {"code": 0, "data": {...real_data...}} or {"data": {...real_data...}}
@@ -453,27 +470,6 @@ private static function fetch_klook_html($url) {
                 . wp_json_encode($synth_data)
                 . '</script></body></html>';
             return array('body' => $synth_html, 'url' => $url, 'source' => $api_source);
-        }
-    }
-
-    // ── 2. ScraperAPI ultra_premium — JS render + DataDome bypass ────────────
-    // Placed right after fast JSON API. Was working before and handles DataDome-blocked
-    // pages. JSON API (8s*6=48s) + ultra_premium (60s) = ~108s, within server timeouts.
-    if (!empty($sa_key)) {
-        $sa_url_up = 'https://api.scraperapi.com?' . http_build_query(array(
-            'api_key'       => $sa_key,
-            'url'           => $url,
-            'ultra_premium' => 'true',
-            'render'        => 'true',
-            'country_code'  => 'us',
-        ));
-        $sa_r_up = self::remote_get($sa_url_up, array('timeout' => 60));
-        if (!is_wp_error($sa_r_up)) {
-            $sa_b_up = wp_remote_retrieve_body($sa_r_up);
-            if (!$is_error_body($sa_b_up) && strpos($sa_b_up, '__NEXT_DATA__') !== false) {
-                return array('body' => $sa_b_up, 'url' => $url, 'source' => 'scraperapi_ultra');
-            }
-            if (!$is_error_body($sa_b_up) && !empty($sa_b_up)) $best_body = $sa_b_up;
         }
     }
 
