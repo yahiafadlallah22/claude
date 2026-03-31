@@ -331,59 +331,7 @@ private static function fetch_klook_html($url) {
 
     $sa_key = self::get_scraperapi_key();
 
-    // ── 1a. ScraperAPI ultra_premium (DataDome bypass) ────────────────────────
-    if (!empty($sa_key)) {
-        $sa_url_up = 'https://api.scraperapi.com?' . http_build_query(array(
-            'api_key'       => $sa_key,
-            'url'           => $url,
-            'ultra_premium' => 'true',
-            'render'        => 'true',
-            'country_code'  => 'us',
-        ));
-        $sa_r_up = self::remote_get($sa_url_up, array('timeout' => 60));
-        if (!is_wp_error($sa_r_up)) {
-            $sa_b_up = wp_remote_retrieve_body($sa_r_up);
-            if (!$is_error_body($sa_b_up) && strpos($sa_b_up, '__NEXT_DATA__') !== false) {
-                return array('body' => $sa_b_up, 'url' => $url, 'source' => 'scraperapi_ultra');
-            }
-            if (!$is_error_body($sa_b_up) && !empty($sa_b_up)) $best_body = $sa_b_up;
-        }
-
-        // ── 1b. ScraperAPI render=true + premium + US (original working config) ─
-        $sa_url_us = 'https://api.scraperapi.com?' . http_build_query(array(
-            'api_key'      => $sa_key,
-            'url'          => $url,
-            'render'       => 'true',
-            'premium'      => 'true',
-            'country_code' => 'us',
-        ));
-        $sa_r_us = self::remote_get($sa_url_us, array('timeout' => 45));
-        if (!is_wp_error($sa_r_us)) {
-            $sa_b_us = wp_remote_retrieve_body($sa_r_us);
-            if (!$is_error_body($sa_b_us) && strpos($sa_b_us, '__NEXT_DATA__') !== false) {
-                return array('body' => $sa_b_us, 'url' => $url, 'source' => 'scraperapi_premium');
-            }
-            if (!$is_error_body($sa_b_us) && !empty($sa_b_us) && empty($best_body)) $best_body = $sa_b_us;
-        }
-
-        // ── 1c. ScraperAPI render=true only (v1.16 original — no premium) ─────
-        $sa_url_r = 'https://api.scraperapi.com?' . http_build_query(array(
-            'api_key'      => $sa_key,
-            'url'          => $url,
-            'render'       => 'true',
-            'country_code' => 'us',
-        ));
-        $sa_r_r = self::remote_get($sa_url_r, array('timeout' => 45));
-        if (!is_wp_error($sa_r_r)) {
-            $sa_b_r = wp_remote_retrieve_body($sa_r_r);
-            if (!$is_error_body($sa_b_r) && strpos($sa_b_r, '__NEXT_DATA__') !== false) {
-                return array('body' => $sa_b_r, 'url' => $url, 'source' => 'scraperapi_render');
-            }
-            if (!$is_error_body($sa_b_r) && !empty($sa_b_r) && empty($best_body)) $best_body = $sa_b_r;
-        }
-    }
-
-    // ── 2. Klook JSON API (bypasses DataDome entirely — API ≠ browser) ───────
+    // ── 1. Klook JSON API (bypasses DataDome entirely — API ≠ browser) ───────
     // DataDome targets browser-type traffic. Klook's own mobile/app API endpoints
     // return JSON directly and are not behind the DataDome challenge.
     // We wrap the JSON response as synthetic __NEXT_DATA__ so parsers work unchanged.
@@ -630,6 +578,58 @@ private static function fetch_klook_html($url) {
                 }
                 if (!$is_error_body($snap_b) && !empty($snap_b) && empty($best_body)) $best_body = self::strip_wayback_rewrites($snap_b);
             }
+        }
+    }
+
+    // ── Last resort. ScraperAPI with JS rendering ─────────────────────────────
+    // Only reached when direct API, direct cURL and Wayback all failed.
+    // These calls are expensive and slow (up to 60s each) but can bypass DataDome.
+    if (!empty($sa_key)) {
+        $sa_url_up = 'https://api.scraperapi.com?' . http_build_query(array(
+            'api_key'       => $sa_key,
+            'url'           => $url,
+            'ultra_premium' => 'true',
+            'render'        => 'true',
+            'country_code'  => 'us',
+        ));
+        $sa_r_up = self::remote_get($sa_url_up, array('timeout' => 60));
+        if (!is_wp_error($sa_r_up)) {
+            $sa_b_up = wp_remote_retrieve_body($sa_r_up);
+            if (!$is_error_body($sa_b_up) && strpos($sa_b_up, '__NEXT_DATA__') !== false) {
+                return array('body' => $sa_b_up, 'url' => $url, 'source' => 'scraperapi_ultra');
+            }
+            if (!$is_error_body($sa_b_up) && !empty($sa_b_up)) $best_body = $sa_b_up;
+        }
+
+        $sa_url_us = 'https://api.scraperapi.com?' . http_build_query(array(
+            'api_key'      => $sa_key,
+            'url'          => $url,
+            'render'       => 'true',
+            'premium'      => 'true',
+            'country_code' => 'us',
+        ));
+        $sa_r_us = self::remote_get($sa_url_us, array('timeout' => 45));
+        if (!is_wp_error($sa_r_us)) {
+            $sa_b_us = wp_remote_retrieve_body($sa_r_us);
+            if (!$is_error_body($sa_b_us) && strpos($sa_b_us, '__NEXT_DATA__') !== false) {
+                return array('body' => $sa_b_us, 'url' => $url, 'source' => 'scraperapi_premium');
+            }
+            if (!$is_error_body($sa_b_us) && !empty($sa_b_us) && empty($best_body)) $best_body = $sa_b_us;
+        }
+
+        $sa_url_r = 'https://api.scraperapi.com?' . http_build_query(array(
+            'api_key'      => $sa_key,
+            'url'          => $url,
+            'render'       => 'true',
+            'country_code' => 'us',
+        ));
+        $sa_r_r = self::remote_get($sa_url_r, array('timeout' => 45));
+        if (!is_wp_error($sa_r_r)) {
+            $sa_b_r = wp_remote_retrieve_body($sa_r_r);
+            if (!$is_error_body($sa_b_r) && strpos($sa_b_r, '__NEXT_DATA__') !== false) {
+                return array('body' => $sa_b_r, 'url' => $url, 'source' => 'scraperapi_render');
+            }
+            if (!$is_error_body($sa_b_r) && !empty($sa_b_r) && empty($best_body)) $best_body = $sa_b_r;
         }
     }
 
