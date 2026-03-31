@@ -323,11 +323,10 @@ private static function fetch_klook_html($url) {
     // $fetch_url can be the direct endpoint OR a ScraperAPI-wrapped URL.
     $try_klook_api_call = function($fetch_url, $timeout = 45) {
         $api_r = self::remote_get($fetch_url, array('timeout' => $timeout, 'headers' => array(
-            'Accept'           => 'application/json, text/plain, */*',
-            'Accept-Language'  => 'en-US,en;q=0.9',
-            'Origin'           => 'https://www.klook.com',
-            'Referer'          => 'https://www.klook.com/',
-            'X-Requested-With' => 'XMLHttpRequest',
+            'Accept'          => 'application/json',
+            'Accept-Language' => 'en-US,en;q=0.9',
+            'Origin'          => 'https://www.klook.com',
+            'Referer'         => 'https://www.klook.com/',
         )));
         if (is_wp_error($api_r)) return null;
         $api_body = wp_remote_retrieve_body($api_r);
@@ -352,9 +351,13 @@ private static function fetch_klook_html($url) {
 
     if ($act_id) {
         $api_endpoints = array(
+            // Mirror the same /v1/experiencelist/ path family that works for listing
+            'https://www.klook.com/v1/experienceDetail/getExperienceDetail/?activity_id=' . $act_id . '&currency=USD&language=en-US',
             'https://www.klook.com/v1/activityDetail/getActivityInfo/?activity_id=' . $act_id . '&currency=USD&language=en-US',
-            'https://www.klook.com/api/seasoning/v2/activity/' . $act_id . '/?currency=USD&language=en-US',
             'https://www.klook.com/api/merapi/v2/activity/detail/?activity_id=' . $act_id . '&currency=USD&language=en-US',
+            'https://www.klook.com/api/merapi/v1/activity/detail/?activity_id=' . $act_id . '&currency=USD&language=en-US',
+            'https://www.klook.com/v1/activitylist/getCityActivityList/?activity_id=' . $act_id . '&currency=USD&language=en-US',
+            'https://www.klook.com/api/seasoning/v2/activity/' . $act_id . '/?currency=USD&language=en-US',
         );
 
         $inner = null;
@@ -365,7 +368,7 @@ private static function fetch_klook_html($url) {
             $api_data = $try_klook_api_call($api_ep, 30);
             if (!$api_data) continue;
             $inner = $extract_api_payload($api_data);
-            if ($inner && count($inner) >= 3) { $api_source = 'klook_api'; break; }
+            if ($inner && count($inner) >= 2) { $api_source = 'klook_api'; break; }
             $inner = null;
         }
 
@@ -379,7 +382,7 @@ private static function fetch_klook_html($url) {
                 // ScraperAPI may return its own error JSON
                 if (isset($api_data['statusCode']) && $api_data['statusCode'] >= 400) continue;
                 $inner = $extract_api_payload($api_data);
-                if ($inner && count($inner) >= 3) { $api_source = 'klook_api_scraperapi'; break; }
+                if ($inner && count($inner) >= 2) { $api_source = 'klook_api_scraperapi'; break; }
                 $inner = null;
             }
         }
@@ -411,6 +414,9 @@ private static function fetch_klook_html($url) {
         $hotel_endpoints = array(
             'https://www.klook.com/api/merapi/v2/hotel/detail/?hotel_id=' . $hotel_id . '&currency=USD&language=en-US',
             'https://www.klook.com/v1/hotelDetail/getHotelInfo/?hotel_id=' . $hotel_id . '&currency=USD&language=en-US',
+            'https://www.klook.com/api/merapi/v1/hotel/detail/?hotel_id=' . $hotel_id . '&currency=USD&language=en-US',
+            'https://www.klook.com/v1/hotelDetail/getHotelBasicInfo/?hotel_id=' . $hotel_id . '&currency=USD&language=en-US',
+            'https://www.klook.com/api/merapi/v2/accommodation/detail/?hotel_id=' . $hotel_id . '&currency=USD&language=en-US',
         );
 
         $inner = null;
@@ -421,7 +427,7 @@ private static function fetch_klook_html($url) {
             $api_data = $try_klook_api_call($api_ep, 30);
             if (!$api_data) continue;
             $inner = $extract_api_payload($api_data);
-            if ($inner && count($inner) >= 3) { $api_source = 'klook_api_hotel'; break; }
+            if ($inner && count($inner) >= 2) { $api_source = 'klook_api_hotel'; break; }
             $inner = null;
         }
 
@@ -434,7 +440,7 @@ private static function fetch_klook_html($url) {
                 if (!$api_data) continue;
                 if (isset($api_data['statusCode']) && $api_data['statusCode'] >= 400) continue;
                 $inner = $extract_api_payload($api_data);
-                if ($inner && count($inner) >= 3) { $api_source = 'klook_api_hotel_scraperapi'; break; }
+                if ($inner && count($inner) >= 2) { $api_source = 'klook_api_hotel_scraperapi'; break; }
                 $inner = null;
             }
         }
