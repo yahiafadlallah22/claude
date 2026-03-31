@@ -601,9 +601,9 @@ private static function fetch_klook_html($url) {
             if (!is_wp_error($wb_r)) {
                 $wb_b = wp_remote_retrieve_body($wb_r);
                 if (!$is_error_body($wb_b) && strpos($wb_b, '__NEXT_DATA__') !== false) {
-                    return array('body' => $wb_b, 'url' => $url, 'source' => 'wayback_cdx');
+                    return array('body' => self::strip_wayback_rewrites($wb_b), 'url' => $url, 'source' => 'wayback_cdx');
                 }
-                if (!$is_error_body($wb_b) && !empty($wb_b) && empty($best_body)) $best_body = $wb_b;
+                if (!$is_error_body($wb_b) && !empty($wb_b) && empty($best_body)) $best_body = self::strip_wayback_rewrites($wb_b);
             }
         }
     }
@@ -619,9 +619,9 @@ private static function fetch_klook_html($url) {
             if (!is_wp_error($snap_r)) {
                 $snap_b = wp_remote_retrieve_body($snap_r);
                 if (!$is_error_body($snap_b) && strpos($snap_b, '__NEXT_DATA__') !== false) {
-                    return array('body' => $snap_b, 'url' => $url, 'source' => 'wayback_avail');
+                    return array('body' => self::strip_wayback_rewrites($snap_b), 'url' => $url, 'source' => 'wayback_avail');
                 }
-                if (!$is_error_body($snap_b) && !empty($snap_b) && empty($best_body)) $best_body = $snap_b;
+                if (!$is_error_body($snap_b) && !empty($snap_b) && empty($best_body)) $best_body = self::strip_wayback_rewrites($snap_b);
             }
         }
     }
@@ -924,6 +924,38 @@ private static function discover_klook_urls_via_cdx($type, $city_slug, $limit = 
 }
 
 
+
+/**
+ * Strip Wayback Machine URL rewrites from an archived HTML page.
+ *
+ * When Wayback Machine serves a page it rewrites every URL inside the HTML
+ * (including inside __NEXT_DATA__ JSON) like:
+ *   https://web.archive.org/web/20230101000000/https://res.klook.com/image.jpg
+ * This restores the original URL so images download from the real CDN.
+ */
+private static function strip_wayback_rewrites($html) {
+    if (empty($html)) return $html;
+    // Replace all Wayback prefixes: /web/{digits}{optional_suffix}/ followed by https:// or http://
+    $html = preg_replace('#https?://web\.archive\.org/web/\d+[a-z_]*/https://#i', 'https://', $html);
+    $html = preg_replace('#https?://web\.archive\.org/web/\d+[a-z_]*/http://#i',  'http://',  $html);
+    // Protocol-relative Wayback links: //web.archive.org/web/20230101000000/https://...
+    $html = preg_replace('#//web\.archive\.org/web/\d+[a-z_]*/https://#i', 'https://', $html);
+    $html = preg_replace('#//web\.archive\.org/web/\d+[a-z_]*/http://#i',  'http://',  $html);
+    return $html;
+}
+
+/**
+ * Unwrap a single Wayback Machine URL to its original form.
+ * e.g. https://web.archive.org/web/20230101/https://res.klook.com/img.jpg
+ *   → https://res.klook.com/img.jpg
+ */
+private static function unwrap_wayback_url($url) {
+    if (!is_string($url) || strpos($url, 'web.archive.org') === false) return $url;
+    if (preg_match('#https?://web\.archive\.org/web/\d+[a-z_]*/(https?://.+)#i', $url, $m)) {
+        return $m[1];
+    }
+    return $url;
+}
 
 private static function array_find_first($data, $keys) {
     if (!is_array($data)) {
@@ -4233,11 +4265,11 @@ if ($next_data_raw !== '') {
             // First look for a scalar image URL
             $image_candidate = self::array_find_first($next_props, $img_scalar_keys);
             if (is_string($image_candidate) && preg_match('#https?://#', $image_candidate)) {
-                $data['image'] = $image_candidate;
+                $data['image'] = self::unwrap_wayback_url($image_candidate);
             } elseif (is_array($image_candidate)) {
                 $possible = self::array_find_first($image_candidate, $img_scalar_keys);
                 if (is_string($possible) && preg_match('#https?://#', $possible)) {
-                    $data['image'] = $possible;
+                    $data['image'] = self::unwrap_wayback_url($possible);
                 }
             }
         }
@@ -4247,7 +4279,9 @@ if ($next_data_raw !== '') {
         if (!empty($next_images)) {
             $filtered_next = array();
             foreach ($next_images as $img) {
-                if (is_string($img) && preg_match('#https?://#i', $img) &&
+                if (!is_string($img)) continue;
+                $img = self::unwrap_wayback_url($img); // strip any Wayback Machine wrapper
+                if (preg_match('#https?://#i', $img) &&
                     (stripos($img, 'klook') !== false || preg_match('/\.(jpg|jpeg|png|webp)(\?|$)/i', $img))) {
                     $filtered_next[] = $img;
                 }
