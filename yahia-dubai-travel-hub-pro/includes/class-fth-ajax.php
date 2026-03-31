@@ -302,19 +302,21 @@ private static function fetch_klook_html($url) {
     // or {"code": 0, "data": {...real_data...}} or {"data": {...real_data...}}
     $extract_api_payload = function($api_data) {
         if (!is_array($api_data)) return null;
-        // Try common wrapper paths, deepest first
+        // Build candidate paths, deepest first
         $candidates = array();
         if (isset($api_data['result']['data']))  $candidates[] = $api_data['result']['data'];
         if (isset($api_data['result']))          $candidates[] = $api_data['result'];
         if (isset($api_data['data']['data']))    $candidates[] = $api_data['data']['data'];
         if (isset($api_data['data']))            $candidates[] = $api_data['data'];
         $candidates[] = $api_data;
+        // Unwrap list responses (listing-search-by-id returns [{...item...}])
         foreach ($candidates as $c) {
-            if (is_array($c) && count($c) >= 3) return $c; // need at least 3 keys to be meaningful
+            if (is_array($c) && isset($c[0]) && is_array($c[0]) && count($c[0]) >= 2) {
+                return $c[0]; // first item of a list response
+            }
         }
-        // Relax: accept 2+ keys
         foreach ($candidates as $c) {
-            if (is_array($c) && count($c) >= 2) return $c;
+            if (is_array($c) && !isset($c[0]) && count($c) >= 2) return $c;
         }
         return null;
     };
@@ -351,13 +353,14 @@ private static function fetch_klook_html($url) {
 
     if ($act_id) {
         $api_endpoints = array(
-            // Mirror the same /v1/experiencelist/ path family that works for listing
+            // These use the SAME endpoint families confirmed to work during listing discovery
+            'https://www.klook.com/v1/experiencelist/getExperienceList/?activity_id=' . $act_id . '&currency=USD&language=en-US&per_page=1',
+            'https://www.klook.com/api/merapi/v2/activity/search/?activity_id=' . $act_id . '&currency=USD&language=en-US&page_size=1',
+            'https://www.klook.com/v1/activitylist/getCityActivityList/?activity_id=' . $act_id . '&currency=USD&language=en-US&per_page=1',
+            // Standard detail endpoints as fallback
             'https://www.klook.com/v1/experienceDetail/getExperienceDetail/?activity_id=' . $act_id . '&currency=USD&language=en-US',
             'https://www.klook.com/v1/activityDetail/getActivityInfo/?activity_id=' . $act_id . '&currency=USD&language=en-US',
             'https://www.klook.com/api/merapi/v2/activity/detail/?activity_id=' . $act_id . '&currency=USD&language=en-US',
-            'https://www.klook.com/api/merapi/v1/activity/detail/?activity_id=' . $act_id . '&currency=USD&language=en-US',
-            'https://www.klook.com/v1/activitylist/getCityActivityList/?activity_id=' . $act_id . '&currency=USD&language=en-US',
-            'https://www.klook.com/api/seasoning/v2/activity/' . $act_id . '/?currency=USD&language=en-US',
         );
 
         $inner = null;
@@ -412,11 +415,13 @@ private static function fetch_klook_html($url) {
         }
     } elseif ($hotel_id) {
         $hotel_endpoints = array(
+            // Same listing endpoint families confirmed working, filtered by hotel_id
+            'https://www.klook.com/api/merapi/v2/hotel/search/?hotel_id=' . $hotel_id . '&currency=USD&language=en-US&page_size=1',
+            'https://www.klook.com/v1/hotellist/getCityHotelList/?hotel_id=' . $hotel_id . '&currency=USD&language=en-US&per_page=1',
+            // Standard detail endpoints as fallback
             'https://www.klook.com/api/merapi/v2/hotel/detail/?hotel_id=' . $hotel_id . '&currency=USD&language=en-US',
             'https://www.klook.com/v1/hotelDetail/getHotelInfo/?hotel_id=' . $hotel_id . '&currency=USD&language=en-US',
             'https://www.klook.com/api/merapi/v1/hotel/detail/?hotel_id=' . $hotel_id . '&currency=USD&language=en-US',
-            'https://www.klook.com/v1/hotelDetail/getHotelBasicInfo/?hotel_id=' . $hotel_id . '&currency=USD&language=en-US',
-            'https://www.klook.com/api/merapi/v2/accommodation/detail/?hotel_id=' . $hotel_id . '&currency=USD&language=en-US',
         );
 
         $inner = null;
