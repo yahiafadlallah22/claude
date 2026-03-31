@@ -628,25 +628,29 @@ private static function fetch_klook_listing_via_api($type, $city_id, $limit = 10
     $pages  = ceil($limit / 20);
     $sa_key = self::get_scraperapi_key();
 
-    // Helper: try one listing API endpoint (direct first, then via ScraperAPI proxy if needed)
-    $try_listing_ep = function($ep) use ($headers, $sa_key) {
-        // 1. Direct call
-        $r    = self::remote_get($ep, array('timeout' => 25, 'headers' => $headers));
+    // Helper: try one listing API endpoint — direct call only (fast, 10s)
+    // ScraperAPI is tried only after all direct endpoints fail (see below).
+    $try_listing_ep = function($ep) use ($headers) {
+        $r    = self::remote_get($ep, array('timeout' => 10, 'headers' => $headers));
         $body = !is_wp_error($r) ? wp_remote_retrieve_body($r) : '';
         $trimmed = ltrim((string) $body);
-        $is_json = !empty($trimmed) && strncasecmp($trimmed, '<', 1) !== 0;
-        if (!$is_json && $sa_key) {
-            // 2. Via ScraperAPI (no render — cheap proxy for JSON APIs)
-            $sa_ep = 'https://api.scraperapi.com?' . http_build_query(array(
-                'api_key'      => $sa_key,
-                'url'          => $ep,
-                'country_code' => 'us',
-            ));
-            $r2    = self::remote_get($sa_ep, array('timeout' => 60, 'headers' => $headers));
-            $body2 = !is_wp_error($r2) ? wp_remote_retrieve_body($r2) : '';
-            $t2    = ltrim((string) $body2);
-            if (!empty($t2) && strncasecmp($t2, '<', 1) !== 0) $body = $body2;
-        }
+        if (empty($trimmed) || strncasecmp($trimmed, '<', 1) === 0) return null;
+        $json = json_decode($body, true);
+        return is_array($json) ? $json : null;
+    };
+
+    // Same as above but via ScraperAPI proxy (residential IP bypass)
+    $try_listing_ep_sa = function($ep) use ($headers, $sa_key) {
+        if (empty($sa_key)) return null;
+        $sa_ep = 'https://api.scraperapi.com?' . http_build_query(array(
+            'api_key'      => $sa_key,
+            'url'          => $ep,
+            'country_code' => 'us',
+        ));
+        $r    = self::remote_get($sa_ep, array('timeout' => 25, 'headers' => $headers));
+        $body = !is_wp_error($r) ? wp_remote_retrieve_body($r) : '';
+        $trimmed = ltrim((string) $body);
+        if (empty($trimmed) || strncasecmp($trimmed, '<', 1) === 0) return null;
         $json = json_decode($body, true);
         return is_array($json) ? $json : null;
     };
@@ -680,13 +684,15 @@ private static function fetch_klook_listing_via_api($type, $city_id, $limit = 10
             'https://www.klook.com/v1/htl/search/?city_id=%d&currency=USD&language=en-US&page=%d&per_page=20',
             'https://www.klook.com/api/merapi/v2/accommodation/search/?city_id=%d&currency=USD&language=en-US&page=%d&page_size=20',
         );
+        // Pass 1: direct calls only (fast — 10s per endpoint)
+        $working_tpl = null;
         foreach ($list_endpoints as $tpl) {
             if (count($urls) >= $limit) break;
             $ep_urls_before = count($urls);
             for ($pg = 1; $pg <= $pages; $pg++) {
                 $ep   = sprintf($tpl, $city_id, $pg);
                 $json = $try_listing_ep($ep);
-                if (!$json) continue;
+                if (!$json) break; // endpoint failed on this page — skip remaining pages
                 $items = $parse_items_hotel($json);
                 if (empty($items)) break; // no more results
                 foreach ($items as $item) {
@@ -704,7 +710,35 @@ private static function fetch_klook_listing_via_api($type, $city_id, $limit = 10
                     if (count($urls) >= $limit) break 2;
                 }
             }
-            if (count($urls) > $ep_urls_before) break; // endpoint worked
+            if (count($urls) > $ep_urls_before) { $working_tpl = $tpl; break; }
+        }
+        // Pass 2: if all direct calls failed, retry best endpoint via ScraperAPI proxy
+        if (empty($urls) && $sa_key) {
+            foreach ($list_endpoints as $tpl) {
+                $ep_urls_before = count($urls);
+                for ($pg = 1; $pg <= $pages; $pg++) {
+                    $ep   = sprintf($tpl, $city_id, $pg);
+                    $json = $try_listing_ep_sa($ep);
+                    if (!$json) break;
+                    $items = $parse_items_hotel($json);
+                    if (empty($items)) break;
+                    foreach ($items as $item) {
+                        if (!is_array($item)) continue;
+                        $hid  = (string) self::array_find_first($item, array('hotel_id','hotelId','id','property_id'));
+                        $slug = (string) self::array_find_first($item, array('hotel_url_name','urlName','slug','hotel_slug','seoName','url_name','name_slug'));
+                        if (empty($hid) || !is_numeric($hid)) continue;
+                        if (!empty($slug)) {
+                            $slug = preg_replace('/[^a-z0-9-]/i', '-', strtolower(trim($slug)));
+                            $u = 'https://www.klook.com/en-US/hotels/' . $hid . '-' . $slug . '/';
+                        } else {
+                            $u = 'https://www.klook.com/en-US/hotels/detail/' . $hid . '-hotel/';
+                        }
+                        $urls[] = $u;
+                        if (count($urls) >= $limit) break 2;
+                    }
+                }
+                if (count($urls) > $ep_urls_before) break;
+            }
         }
     } else {
         $list_endpoints = array(
@@ -712,13 +746,14 @@ private static function fetch_klook_listing_via_api($type, $city_id, $limit = 10
             'https://www.klook.com/api/merapi/v2/activity/search/?city_id=%d&currency=USD&language=en-US&page=%d&page_size=20',
             'https://www.klook.com/v1/activitylist/getCityActivityList/?city_id=%d&currency=USD&language=en-US&page=%d&per_page=20',
         );
+        // Pass 1: direct calls only (fast — 10s per endpoint)
         foreach ($list_endpoints as $tpl) {
             if (count($urls) >= $limit) break;
             $ep_urls_before = count($urls);
             for ($pg = 1; $pg <= $pages; $pg++) {
                 $ep   = sprintf($tpl, $city_id, $pg);
                 $json = $try_listing_ep($ep);
-                if (!$json) continue;
+                if (!$json) break; // endpoint failed — skip remaining pages
                 $items = $parse_items_act($json);
                 if (empty($items)) break;
                 foreach ($items as $item) {
@@ -737,6 +772,34 @@ private static function fetch_klook_listing_via_api($type, $city_id, $limit = 10
                 }
             }
             if (count($urls) > $ep_urls_before) break;
+        }
+        // Pass 2: if all direct calls failed, retry via ScraperAPI proxy
+        if (empty($urls) && $sa_key) {
+            foreach ($list_endpoints as $tpl) {
+                $ep_urls_before = count($urls);
+                for ($pg = 1; $pg <= $pages; $pg++) {
+                    $ep   = sprintf($tpl, $city_id, $pg);
+                    $json = $try_listing_ep_sa($ep);
+                    if (!$json) break;
+                    $items = $parse_items_act($json);
+                    if (empty($items)) break;
+                    foreach ($items as $item) {
+                        if (!is_array($item)) continue;
+                        $aid  = (string) self::array_find_first($item, array('activity_id','activityId','id'));
+                        $slug = (string) self::array_find_first($item, array('url_name','urlName','seo_name','seoName','slug','activity_url'));
+                        if (empty($aid) || !is_numeric($aid)) continue;
+                        if (!empty($slug)) {
+                            $slug = preg_replace('/[^a-z0-9-]/i', '-', strtolower(trim($slug)));
+                            $u = 'https://www.klook.com/en-US/activity/' . $aid . '-' . $slug . '/';
+                        } else {
+                            $u = 'https://www.klook.com/en-US/activity/' . $aid . '-activity/';
+                        }
+                        $urls[] = $u;
+                        if (count($urls) >= $limit) break 2;
+                    }
+                }
+                if (count($urls) > $ep_urls_before) break;
+            }
         }
     }
 
