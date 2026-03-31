@@ -291,6 +291,11 @@ private static function fetch_klook_listing_html($url) {
  * @return array  { body: string, url: string, source: string }
  */
 private static function fetch_klook_html($url) {
+    // Force USD currency on all Klook page fetches so Wayback / ScraperAPI results
+    // always contain USD prices, not local-currency values from archived pages.
+    if (strpos($url, 'klook.com') !== false && strpos($url, 'currency=') === false) {
+        $url = add_query_arg('currency', 'USD', $url);
+    }
     $result    = array('body' => '', 'url' => $url, 'source' => 'none');
     $best_body = '';
 
@@ -2651,6 +2656,16 @@ public static function import_bulk_city() {
         if (!empty($data['original_price'])) {
             $data['original_price'] = self::normalize_price_amount($data['original_price'], 1);
         }
+        // If the parsed currency is not USD, discard prices — they're in the wrong currency.
+        // All fetch strategies request USD; a non-USD result means the page was cached/archived
+        // with a different locale and the numeric value is not reliable as a USD amount.
+        $parsed_currency = strtoupper(trim(!empty($data['currency']) ? $data['currency'] : 'USD'));
+        if ($parsed_currency !== 'USD') {
+            $data['price']          = '';
+            $data['original_price'] = '';
+        }
+        // Always store USD as the currency — every fetch already requests USD.
+        $data['currency'] = 'USD';
         // Discard original_price if it is not actually higher than selling price
         if (!empty($data['original_price']) && !empty($data['price']) && (float) $data['original_price'] <= (float) $data['price']) {
             $data['original_price'] = '';
@@ -2663,7 +2678,7 @@ public static function import_bulk_city() {
         // Save meta
         if (!empty($data['price']))          update_post_meta($post_id, '_fth_price', $data['price']);
         if (!empty($data['original_price'])) update_post_meta($post_id, '_fth_original_price', $data['original_price']);
-        update_post_meta($post_id, '_fth_currency', !empty($data['currency']) ? $data['currency'] : 'USD');
+        update_post_meta($post_id, '_fth_currency', 'USD');
         if (!empty($data['rating']))         update_post_meta($post_id, '_fth_rating', $data['rating']);
         if (!empty($data['review_count']))   update_post_meta($post_id, '_fth_review_count', $data['review_count']);
         if (!empty($data['duration']))       update_post_meta($post_id, '_fth_duration', $data['duration']);
@@ -3197,7 +3212,13 @@ public static function import_bulk_city() {
             $data['promo'] = Flavor_Travel_Hub::get_promo_text();
         }
         update_post_meta($post_id, '_fth_promo', $data['promo']);
-        update_post_meta($post_id, '_fth_currency', !empty($data['currency']) ? $data['currency'] : 'USD');
+        // If parsed currency is not USD, discard prices — wrong numeric value from non-USD locale.
+        $hotel_currency = strtoupper(trim(!empty($data['currency']) ? $data['currency'] : 'USD'));
+        if ($hotel_currency !== 'USD') {
+            $data['price']          = '';
+            $data['original_price'] = '';
+        }
+        update_post_meta($post_id, '_fth_currency', 'USD');
         foreach (array('price','original_price','rating','review_count','address','amenities','image','affiliate_link') as $field) {
             if (isset($data[$field]) && $data[$field] !== '') update_post_meta($post_id, '_fth_' . $field, $data[$field]);
         }
