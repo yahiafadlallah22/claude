@@ -454,7 +454,30 @@ private static function fetch_klook_html($url) {
                 . '</script></body></html>';
             return array('body' => $synth_html, 'url' => $url, 'source' => $api_source);
         }
-    } elseif ($hotel_id) {
+    }
+
+    // ── 2. ScraperAPI ultra_premium — JS render + DataDome bypass ────────────
+    // Placed right after fast JSON API. Was working before and handles DataDome-blocked
+    // pages. JSON API (8s*6=48s) + ultra_premium (60s) = ~108s, within server timeouts.
+    if (!empty($sa_key)) {
+        $sa_url_up = 'https://api.scraperapi.com?' . http_build_query(array(
+            'api_key'       => $sa_key,
+            'url'           => $url,
+            'ultra_premium' => 'true',
+            'render'        => 'true',
+            'country_code'  => 'us',
+        ));
+        $sa_r_up = self::remote_get($sa_url_up, array('timeout' => 60));
+        if (!is_wp_error($sa_r_up)) {
+            $sa_b_up = wp_remote_retrieve_body($sa_r_up);
+            if (!$is_error_body($sa_b_up) && strpos($sa_b_up, '__NEXT_DATA__') !== false) {
+                return array('body' => $sa_b_up, 'url' => $url, 'source' => 'scraperapi_ultra');
+            }
+            if (!$is_error_body($sa_b_up) && !empty($sa_b_up)) $best_body = $sa_b_up;
+        }
+    }
+
+    if ($hotel_id) {
         $hotel_endpoints = array(
             // Same listing endpoint families confirmed working, filtered by hotel_id
             'https://www.klook.com/api/merapi/v2/hotel/search/?hotel_id=' . $hotel_id . '&currency=USD&language=en-US&page_size=1',
@@ -537,7 +560,9 @@ private static function fetch_klook_html($url) {
     }
 
     // ── 6. Wayback Machine CDX API (up to 5 timestamps, 5 years back) ─────────
-    $url_bare  = preg_replace('#^https?://#', '', rtrim($url, '/'));
+    // Strip query params before CDX search — Wayback archives the clean URL, not ?currency=USD
+    $url_clean = preg_replace('#\?.*#', '', $url);
+    $url_bare  = preg_replace('#^https?://#', '', rtrim($url_clean, '/'));
     $url_noloc = preg_replace('#/en-US/#', '/', $url_bare); // also try without locale in CDX
     $wb_tried  = array();
     foreach (array($url_bare, $url_noloc) as $_wb_url) {
@@ -587,26 +612,8 @@ private static function fetch_klook_html($url) {
         }
     }
 
-    // ── Last resort. ScraperAPI with JS rendering ─────────────────────────────
-    // Only reached when direct API, direct cURL and Wayback all failed.
-    // These calls are expensive and slow (up to 60s each) but can bypass DataDome.
+    // ── Last resort. ScraperAPI premium + render-only (ultra_premium already tried above) ──
     if (!empty($sa_key)) {
-        $sa_url_up = 'https://api.scraperapi.com?' . http_build_query(array(
-            'api_key'       => $sa_key,
-            'url'           => $url,
-            'ultra_premium' => 'true',
-            'render'        => 'true',
-            'country_code'  => 'us',
-        ));
-        $sa_r_up = self::remote_get($sa_url_up, array('timeout' => 60));
-        if (!is_wp_error($sa_r_up)) {
-            $sa_b_up = wp_remote_retrieve_body($sa_r_up);
-            if (!$is_error_body($sa_b_up) && strpos($sa_b_up, '__NEXT_DATA__') !== false) {
-                return array('body' => $sa_b_up, 'url' => $url, 'source' => 'scraperapi_ultra');
-            }
-            if (!$is_error_body($sa_b_up) && !empty($sa_b_up)) $best_body = $sa_b_up;
-        }
-
         $sa_url_us = 'https://api.scraperapi.com?' . http_build_query(array(
             'api_key'      => $sa_key,
             'url'          => $url,
@@ -724,11 +731,13 @@ private static function fetch_klook_listing_via_api($type, $city_id, $limit = 10
     if ($type === 'hotel') {
         $list_endpoints = array(
             'https://www.klook.com/api/merapi/v2/hotel/search/?city_id=%d&currency=USD&language=en-US&page=%d&page_size=20',
+            'https://www.klook.com/api/merapi/v2/htl/search/?city_id=%d&currency=USD&language=en-US&page=%d&page_size=20',
             'https://www.klook.com/v1/hotellist/getCityHotelList/?city_id=%d&currency=USD&language=en-US&page=%d&per_page=20',
             'https://www.klook.com/v1/hotelList/getHotelList/?city_id=%d&currency=USD&language=en-US&page=%d&limit=20',
             'https://www.klook.com/api/merapi/v1/accommodation/list/?city_id=%d&currency=USD&language=en-US&page=%d&page_size=20',
-            'https://www.klook.com/v1/htl/search/?city_id=%d&currency=USD&language=en-US&page=%d&per_page=20',
             'https://www.klook.com/api/merapi/v2/accommodation/search/?city_id=%d&currency=USD&language=en-US&page=%d&page_size=20',
+            'https://www.klook.com/v1/htl/search/?city_id=%d&currency=USD&language=en-US&page=%d&per_page=20',
+            'https://www.klook.com/api/merapi/v2/hotel/list/?city_id=%d&currency=USD&language=en-US&page=%d&page_size=20',
         );
         // Pass 1: direct calls only (fast — 10s per endpoint)
         $working_tpl = null;
@@ -961,10 +970,10 @@ private static function discover_klook_urls_via_cdx($type, $city_slug, $limit = 
     if (empty($city_slug)) return array();
 
     if ($type === 'hotel') {
-        // Hotel detail URLs like /hotels/12345-grand-hyatt-dubai/ often contain the city name.
-        // We search CDX for hotel detail pages whose URL contains the city slug.
-        // This works well for major cities (Dubai, Abu Dhabi, Bangkok, etc.) where hotels
-        // typically include the city in their name/slug.
+        // Search CDX for any Klook hotel detail URL (numbered /hotels/12345-...).
+        // We don't filter by city slug because many hotels don't include the city in
+        // their URL slug (e.g. "Emirates Palace" has no "abu-dhabi" in its slug).
+        // City assignment happens during import from the user's selection, not from the URL.
         $q = http_build_query(array(
             'url'       => 'www.klook.com/en-US/hotels/',
             'output'    => 'json',
@@ -975,9 +984,8 @@ private static function discover_klook_urls_via_cdx($type, $city_slug, $limit = 
             'from'      => date('Ymd', strtotime('-3 years')),
             'to'        => date('Ymd'),
         ));
-        // Filter: must be a numbered hotel detail URL AND contain the city slug
+        // Filter: only numbered hotel detail URLs (not listing pages)
         $q .= '&filter=original:.*hotels%2F[0-9].*';
-        $q .= '&filter=original:.*' . rawurlencode($city_slug) . '.*';
 
         $r = self::remote_get('https://web.archive.org/cdx/search/cdx?' . $q, array('timeout' => 35));
         $urls = array();
